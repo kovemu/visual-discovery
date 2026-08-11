@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Kovemu favicon</title>
+  <desc id="desc">Circular purple-to-pink gradient icon with two white dots and a white bridge symbol.</desc>
+
+  <defs>
+    <linearGradient id="kovemuGradient" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7C3AED"/>
+      <stop offset="52%" stop-color="#C026D3"/>
+      <stop offset="100%" stop-color="#EC4899"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Circular background -->
+  <circle cx="256" cy="256" r="248" fill="url(#kovemuGradient)"/>
+
+  <!-- Creator and fan -->
+  <circle cx="176" cy="190" r="34" fill="#FFFFFF"/>
+  <circle cx="336" cy="190" r="34" fill="#FFFFFF"/>
+
+  <!-- Bridge / connection -->
+  <path
+    d="M112 350
+       C112 264 176 224 256 224
+       C336 224 400 264 400 350
+       H336
+       C336 302 304 278 256 278
+       C208 278 176 302 176 350
+       Z"
+    fill="#FFFFFF"
+  />
+</svg>
