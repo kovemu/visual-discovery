@@ -2,8 +2,9 @@ import Header from "@/components/Header";
 import DiscoverFeed, {
   type FeedItem,
 } from "@/components/discover/DiscoverFeed";
+
 import { getDiscoverFeed } from "@/data/discover";
-import { getRealDiscoverCreators } from "@/lib/discover/getRealDiscoverCreators";
+import { getRealDiscoverWorks } from "@/lib/discover/getRealDiscoverWorks";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,9 @@ function shuffleWorks(works: FeedItem[]): FeedItem[] {
 
 export default async function DiscoverPage() {
   const demoWorks = getDiscoverFeed();
-  const realWorks = await getRealDiscoverCreators();
+
+  // Supabase works 테이블
+  const realWorks = await getRealDiscoverWorks();
 
   const feedWorks: FeedItem[] = shuffleWorks([
     ...realWorks,

@@ -1,5 +1,7 @@
 import CreatorCard from "@/components/CreatorCard";
 import Header from "@/components/Header";
+import FeaturedWorksCarousel from "@/components/artist/FeaturedWorksCarousel";
+import LatestWorksCarousel from "@/components/artist/LatestWorksCarousel";
 
 import {
   allCreators,
@@ -8,6 +10,7 @@ import {
 } from "@/data/creators";
 
 import { categoryCreators } from "@/data/categoryCreators";
+import type { DemoWork } from "@/data/discoverWorks";
 import { createClient } from "@/lib/supabase/server";
 
 import Link from "next/link";
@@ -26,20 +29,32 @@ type DbPost = {
   created_at: string;
 };
 
-function formatFollowers(followers: number) {
-  return new Intl.NumberFormat("en", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(followers);
-}
+type DbWork = {
+  id: number;
+  type: string;
+  source: string;
+  source_id: string | null;
+  source_url: string;
+  title: string | null;
+  description: string | null;
+  thumbnail_url: string | null;
+  published_at: string | null;
+  featured: boolean;
+};
+
+type PlatformItem =
+  | string
+  | {
+      name: string;
+      url: string;
+    };
 
 function normalizeCategory(category: string) {
   return category.toLowerCase();
 }
 
 /*
-  기존 더미 데이터 + 새 categoryCreators 데이터를 합친다.
-  중복 id는 하나만 남긴다.
+  기존 Demo Artist 데이터 통합
 */
 const demoCreators: Creator[] = Array.from(
   new Map(
@@ -71,6 +86,29 @@ function getRelatedCreators(
     .slice(0, 4);
 }
 
+function getPlatformName(platform: PlatformItem) {
+  if (typeof platform === "string") {
+    return platform;
+  }
+
+  return platform.name;
+}
+
+function getPlatformUrl(platform: PlatformItem) {
+  if (typeof platform === "string") {
+    return null;
+  }
+
+  if (
+    platform.url.startsWith("http://") ||
+    platform.url.startsWith("https://")
+  ) {
+    return platform.url;
+  }
+
+  return `https://${platform.url}`;
+}
+
 export async function generateStaticParams() {
   return demoCreators.map((creator) => ({
     id: creator.id,
@@ -85,27 +123,39 @@ export default async function CreatorPage({
   const supabase = await createClient();
 
   /*
-    1. 먼저 Supabase에서 실제 Creator를 찾는다.
+    Supabase Artist 확인
   */
-  const { data: dbCreator } = await supabase
-    .from("creators")
-    .select(
-      `
-        id,
-        username,
-        name,
-        category,
-        bio,
-        profile_image,
-        cover_image,
-        created_at
-      `,
-    )
-    .eq("id", id)
-    .maybeSingle();
+  const { data: dbCreator, error: creatorError } =
+    await supabase
+      .from("creators")
+      .select(
+        `
+          id,
+          username,
+          name,
+          category,
+          bio,
+          profile_image,
+          cover_image,
+          tags,
+          youtube_url,
+          instagram_url,
+          is_curated,
+          created_at
+        `,
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+  if (creatorError) {
+    console.error(
+      "LOAD ARTIST ERROR:",
+      creatorError,
+    );
+  }
 
   /*
-    2. 실제 DB Creator가 아니라면 기존 더미 데이터에서 찾는다.
+    기존 Demo Artist 확인
   */
   const demoCreator = getDemoCreatorById(id);
 
@@ -114,12 +164,160 @@ export default async function CreatorPage({
   }
 
   /*
-    3. 실제 Creator라면 업로드 작품들을 가져온다.
+    공통 Artist 데이터
+  */
+  const artistId =
+    dbCreator?.id ?? demoCreator!.id;
+
+  const artistName =
+    dbCreator?.name ?? demoCreator!.name;
+
+  const rawCategory =
+    dbCreator?.category ??
+    demoCreator!.category;
+
+  const artistCategory =
+    rawCategory.charAt(0).toUpperCase() +
+    rawCategory.slice(1);
+
+  const artistDescription =
+    dbCreator?.bio ||
+    demoCreator?.description ||
+    "Artist on Kovemu.";
+
+  const heroImage =
+    dbCreator?.cover_image ||
+    dbCreator?.profile_image ||
+    demoCreator?.image ||
+    null;
+
+  /*
+    DB tags 우선.
+    DB에 없으면 기존 demo tags,
+    그것도 없으면 category 하나.
+  */
+  const tags =
+    dbCreator?.tags?.length
+      ? dbCreator.tags
+      : demoCreator?.tags ?? [artistCategory];
+
+  /*
+    Artist Links
+
+    DB에서 관리자가 저장한 링크를 우선 사용.
+    DB 링크가 하나도 없으면 기존 demo 링크 fallback.
+  */
+  const platforms: PlatformItem[] = [];
+
+  if (dbCreator?.youtube_url) {
+    platforms.push({
+      name: "YouTube",
+      url: dbCreator.youtube_url,
+    });
+  }
+
+  if (dbCreator?.instagram_url) {
+    platforms.push({
+      name: "Instagram",
+      url: dbCreator.instagram_url,
+    });
+  }
+
+  if (
+    platforms.length === 0 &&
+    demoCreator?.platformLinks
+  ) {
+    platforms.push(
+      ...demoCreator.platformLinks,
+    );
+  }
+
+  /*
+    Supabase Works
+
+    모든 Artist의 YouTube / Image Work는
+    works 테이블 기준.
+  */
+  const { data: dbWorksData, error: worksError } =
+    await supabase
+      .from("works")
+      .select(
+        `
+          id,
+          type,
+          source,
+          source_id,
+          source_url,
+          title,
+          description,
+          thumbnail_url,
+          published_at,
+          featured
+        `,
+      )
+      .eq("artist_id", artistId)
+      .order("published_at", {
+        ascending: false,
+      });
+
+  if (worksError) {
+    console.error(
+      "LOAD ARTIST WORKS ERROR:",
+      worksError,
+    );
+  }
+
+  const dbWorks =
+    (dbWorksData ?? []) as DbWork[];
+
+  /*
+    기존 Carousel이 사용하는 DemoWork 구조로 변환
+  */
+  const importedWorks: DemoWork[] =
+    dbWorks.map((work) => ({
+      id: String(work.id),
+
+      artistId,
+      artistName,
+      category: artistCategory,
+
+      type:
+        work.source === "youtube"
+          ? "youtube"
+          : "image",
+
+      videoId:
+        work.source === "youtube"
+          ? work.source_id ?? undefined
+          : undefined,
+
+      image:
+        work.thumbnail_url ??
+        (work.source !== "youtube"
+          ? work.source_url
+          : undefined),
+
+      caption:
+        work.description ??
+        work.title ??
+        null,
+
+      featured: work.featured,
+
+      publishedAt:
+        work.published_at ?? undefined,
+    }));
+
+  /*
+    기존 가입 Artist가 직접 올린 이미지 posts도
+    당장은 유지.
+
+    추후 posts → works 통합 가능.
   */
   let posts: DbPost[] = [];
 
   if (dbCreator) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("posts")
       .select(
         `
@@ -134,94 +332,126 @@ export default async function CreatorPage({
         ascending: false,
       });
 
+    if (error) {
+      console.error(
+        "LOAD ARTIST POSTS ERROR:",
+        error,
+      );
+    }
+
     posts = data ?? [];
   }
 
   /*
-    실제 Creator와 더미 Creator를
-    아래 UI에서 동일하게 사용할 수 있도록 정리한다.
+    posts 역시 LatestWorksCarousel에서
+    사용할 수 있도록 Work 형태로 변환
   */
+  const uploadedWorks: DemoWork[] =
+    posts.map((post) => ({
+      id: `post-${post.id}`,
 
-  const creatorId =
-    dbCreator?.id ?? demoCreator!.id;
+      artistId,
+      artistName,
+      category: artistCategory,
 
-  const creatorName =
-    dbCreator?.name ?? demoCreator!.name;
+      type: "image",
 
-  const creatorCategory = dbCreator
-    ? dbCreator.category.charAt(0).toUpperCase() +
-      dbCreator.category.slice(1)
-    : demoCreator!.category;
+      image: post.image_url,
 
-  const creatorDescription =
-    dbCreator?.bio ||
-    demoCreator?.description ||
-    "Creator on Kovemu.";
+      caption: post.caption,
+
+      featured: false,
+
+      publishedAt: post.created_at,
+    }));
 
   /*
-    중요:
-    최신 Post를 Hero 이미지로 사용하지 않는다.
+    Featured Works
 
-    Discover만 최신 업로드 이미지를 자동 사용하고,
-    Creator Profile은 별도 cover/profile 이미지를 사용한다.
+    featured=true Work만 표시.
   */
-  const heroImage =
-    dbCreator?.cover_image ||
-    dbCreator?.profile_image ||
-    demoCreator?.image ||
-    null;
+  const featuredWorks =
+    importedWorks
+      .filter((work) => work.featured)
+      .sort((a, b) => {
+        const aTime = a.publishedAt
+          ? new Date(a.publishedAt).getTime()
+          : 0;
 
-  const followers =
-    demoCreator?.followers ?? 0;
+        const bTime = b.publishedAt
+          ? new Date(b.publishedAt).getTime()
+          : 0;
 
-  const badge =
-    demoCreator?.badge ?? null;
+        return bTime - aTime;
+      });
 
-  const tags = demoCreator?.tags ?? [
-    creatorCategory,
-  ];
+  /*
+    Latest Works
 
-  const platforms =
-    demoCreator?.platforms ?? [];
+    featured=true Work는 자동 제외.
+  */
+  const latestWorks =
+    [
+      ...importedWorks.filter(
+        (work) => !work.featured,
+      ),
+      ...uploadedWorks,
+    ].sort((a, b) => {
+      const aTime = a.publishedAt
+        ? new Date(a.publishedAt).getTime()
+        : 0;
+
+      const bTime = b.publishedAt
+        ? new Date(b.publishedAt).getTime()
+        : 0;
+
+      return bTime - aTime;
+    });
 
   const relatedCreators =
     getRelatedCreators(
-      creatorId,
-      creatorCategory,
+      artistId,
+      artistCategory,
     );
+
+  /*
+    Curated 여부는 이제 DB의 is_curated 기준.
+  */
+  const isCurated =
+    dbCreator?.is_curated ?? true;
 
   return (
     <main className="min-h-screen bg-white">
       <Header />
 
-      {/* Creator Hero */}
+      {/* Artist Hero */}
       <section className="border-b border-gray-100 bg-gray-950">
-        <div className="relative mx-auto h-[470px] max-w-7xl overflow-hidden">
+        <div className="relative mx-auto h-[430px] max-w-7xl overflow-hidden">
           {heroImage && (
             <img
               src={heroImage}
-              alt={`${creatorName} featured work`}
-              className="absolute inset-0 h-full w-full object-cover opacity-70"
+              alt={`${artistName} profile`}
+              className="absolute inset-0 h-full w-full object-cover opacity-65"
             />
           )}
 
-          <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/15" />
+          <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20" />
 
-          <div className="relative flex h-full items-end px-6 py-12 text-white lg:px-10 lg:py-16">
+          <div className="relative flex h-full items-end px-6 py-12 text-white lg:px-10 lg:py-14">
             <div className="max-w-2xl">
               <Link
                 href="/discover"
-                className="text-sm font-semibold text-white/70 transition hover:text-white"
+                className="cursor-pointer text-sm font-semibold text-white/70 transition hover:text-white"
               >
                 ← Back to Discover
               </Link>
 
               <p className="mt-8 text-sm font-bold uppercase tracking-[0.22em] text-fuchsia-300">
-                {creatorCategory}
+                {artistCategory}
               </p>
 
-              <h1 className="mt-3 text-5xl font-black tracking-tight md:text-7xl">
-                {creatorName}
+              <h1 className="mt-3 text-5xl font-black tracking-tight md:text-6xl">
+                {artistName}
               </h1>
 
               {dbCreator?.username && (
@@ -231,39 +461,23 @@ export default async function CreatorPage({
               )}
 
               <p className="mt-5 max-w-xl text-lg leading-8 text-white/85">
-                {creatorDescription}
+                {artistDescription}
               </p>
 
-              <div className="mt-7 flex flex-wrap items-center gap-3">
-                {!dbCreator && (
-                  <span className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold backdrop-blur">
-                    {formatFollowers(
-                      followers,
-                    )}{" "}
-                    followers
+              {isCurated && (
+                <div className="mt-6">
+                  <span className="inline-flex rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-bold text-white">
+                    Curated by Kovemu
                   </span>
-                )}
-
-                {badge && (
-                  <span className="rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-bold">
-                    {badge}
-                  </span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                className="mt-8 rounded-full bg-fuchsia-600 px-8 py-3.5 font-bold text-white transition hover:bg-fuchsia-700"
-              >
-                Support Creator
-              </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </section>
 
-      <div className="mx-auto max-w-7xl px-6 py-14 lg:px-10">
-        <div className="grid gap-12 lg:grid-cols-[1fr_320px]">
+      <div className="mx-auto max-w-7xl px-6 py-12 lg:px-10">
+        <div className="grid gap-12 lg:grid-cols-[1fr_300px]">
           <div>
             {/* About */}
             <section>
@@ -272,11 +486,11 @@ export default async function CreatorPage({
               </h2>
 
               <p className="mt-5 max-w-3xl text-lg leading-8 text-gray-600">
-                {creatorDescription}
+                {artistDescription}
               </p>
 
               <div className="mt-7 flex flex-wrap gap-2">
-                {tags.map((tag) => (
+                {tags.map((tag: string) => (
                   <span
                     key={tag}
                     className="rounded-full bg-fuchsia-50 px-4 py-2 text-sm font-semibold text-fuchsia-700"
@@ -287,177 +501,141 @@ export default async function CreatorPage({
               </div>
             </section>
 
+            {/* Featured Works */}
+            {featuredWorks.length > 0 && (
+              <section className="mt-14">
+                <h2 className="text-3xl font-black tracking-tight text-gray-950">
+                  Featured Tracks
+                </h2>
+
+                <p className="mt-2 text-gray-500">
+                  Essential works from{" "}
+                  {artistName}.
+                </p>
+
+                <FeaturedWorksCarousel
+                  works={featuredWorks}
+                  artistName={artistName}
+                />
+              </section>
+            )}
+
             {/* Latest Works */}
             <section className="mt-14">
-              <div className="flex items-end justify-between gap-6">
-                <div>
-                  <h2 className="text-3xl font-black tracking-tight text-gray-950">
-                    Latest Works
-                  </h2>
+              <h2 className="text-3xl font-black tracking-tight text-gray-950">
+                Latest Works
+              </h2>
 
-                  <p className="mt-2 text-gray-500">
-                    Recent projects and representative
-                    work.
-                  </p>
-                </div>
-              </div>
+              <p className="mt-2 text-gray-500">
+                Discover more work from{" "}
+                {artistName}.
+              </p>
 
-              {dbCreator ? (
-                posts.length > 0 ? (
-                  <div className="mt-6 grid gap-5 sm:grid-cols-2">
-                    {posts.map(
-                      (post, index) => (
-                        <article
-                          key={post.id}
-                          className="group overflow-hidden rounded-2xl border border-gray-200 bg-white transition hover:-translate-y-1 hover:shadow-xl"
-                        >
-                          <div className="aspect-video overflow-hidden bg-gray-100">
-                            <img
-                              src={
-                                post.image_url
-                              }
-                              alt={
-                                post.caption ||
-                                `${creatorName} work`
-                              }
-                              draggable={false}
-                              className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                            />
-                          </div>
-
-                          <div className="p-5">
-                            <p className="text-xs font-bold uppercase tracking-wider text-fuchsia-600">
-                              Work{" "}
-                              {index + 1}
-                            </p>
-
-                            <h3 className="mt-2 text-lg font-bold text-gray-950">
-                              {post.caption ||
-                                creatorName}
-                            </h3>
-                          </div>
-                        </article>
-                      ),
-                    )}
-                  </div>
-                ) : (
-                  <div className="mt-6 rounded-2xl border border-dashed border-gray-300 px-6 py-12 text-center">
-                    <p className="font-semibold text-gray-700">
-                      No works uploaded yet.
-                    </p>
-                  </div>
-                )
+              {latestWorks.length > 0 ? (
+                <LatestWorksCarousel
+                  works={latestWorks}
+                  artistName={artistName}
+                />
               ) : (
-                <div className="mt-6 grid gap-5 sm:grid-cols-2">
-                  {[1, 2, 3, 4].map(
-                    (work) => (
-                      <article
-                        key={work}
-                        className="group overflow-hidden rounded-2xl border border-gray-200 bg-white transition hover:-translate-y-1 hover:shadow-xl"
-                      >
-                        <div className="aspect-video overflow-hidden bg-gray-100">
-                          <img
-                            src={
-                              demoCreator!.image
-                            }
-                            alt={`${creatorName} work ${work}`}
-                            draggable={false}
-                            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                          />
-                        </div>
-
-                        <div className="p-5">
-                          <p className="text-xs font-bold uppercase tracking-wider text-fuchsia-600">
-                            Project {work}
-                          </p>
-
-                          <h3 className="mt-2 text-lg font-bold text-gray-950">
-                            {creatorName}
-                          </h3>
-                        </div>
-                      </article>
-                    ),
-                  )}
+                <div className="mt-6 rounded-2xl border border-dashed border-gray-300 px-6 py-12 text-center">
+                  <p className="text-sm text-gray-500">
+                    More works coming soon.
+                  </p>
                 </div>
               )}
             </section>
           </div>
 
-          {/* Sidebar */}
+          {/* Artist Links */}
           <aside>
-            <div className="sticky top-24 rounded-2xl border border-gray-200 bg-white p-6">
+            <div className="rounded-2xl border border-gray-200 bg-white p-6">
               <h2 className="text-xl font-black text-gray-950">
-                Creator Links
+                Artist Links
               </h2>
 
               {platforms.length > 0 ? (
                 <div className="mt-5 space-y-3">
                   {platforms.map(
-                    (platform) => (
-                      <button
-                        key={platform}
-                        type="button"
-                        className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-left font-semibold text-gray-700 transition hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-700"
-                      >
-                        <span>
-                          {platform}
-                        </span>
+                    (platform, index) => {
+                      const name =
+                        getPlatformName(
+                          platform,
+                        );
 
-                        <span>↗</span>
-                      </button>
-                    ),
+                      const url =
+                        getPlatformUrl(
+                          platform,
+                        );
+
+                      if (url) {
+                        return (
+                          <a
+                            key={`${name}-${index}`}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-gray-200 px-4 py-3 font-semibold text-gray-700 transition hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-700"
+                          >
+                            <span>
+                              {name}
+                            </span>
+
+                            <span>↗</span>
+                          </a>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={`${name}-${index}`}
+                          className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 font-semibold text-gray-500"
+                        >
+                          <span>
+                            {name}
+                          </span>
+                        </div>
+                      );
+                    },
                   )}
                 </div>
               ) : (
                 <p className="mt-5 text-sm leading-6 text-gray-500">
-                  No external links added
-                  yet.
+                  No external links
+                  available yet.
                 </p>
               )}
 
-              <div className="mt-7 rounded-2xl bg-fuchsia-50 p-5">
-                <p className="text-sm font-bold text-fuchsia-700">
-                  Support this creator
+              {isCurated && (
+                <p className="mt-6 border-t border-gray-100 pt-5 text-xs leading-5 text-gray-400">
+                  This profile is curated
+                  by Kovemu using publicly
+                  available information.
                 </p>
-
-                <p className="mt-2 text-sm leading-6 text-gray-600">
-                  Continue to the creator&apos;s
-                  official support page.
-                </p>
-
-                <button
-                  type="button"
-                  className="mt-5 w-full rounded-full bg-fuchsia-600 px-5 py-3 font-bold text-white transition hover:bg-fuchsia-700"
-                >
-                  Support
-                </button>
-              </div>
+              )}
             </div>
           </aside>
         </div>
 
-        {/* Related Creators */}
+        {/* Related Artists */}
         {relatedCreators.length > 0 && (
           <section className="mt-20 border-t border-gray-100 pt-12">
             <div className="mb-7">
               <h2 className="text-3xl font-black tracking-tight text-gray-950">
-                You May Also Like
+                Discover More
               </h2>
 
               <p className="mt-2 text-gray-500">
-                More creators worth
-                discovering.
+                More artists you may want
+                to explore.
               </p>
             </div>
 
             <div className="flex gap-5 overflow-x-auto px-1 pb-6 pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {relatedCreators.map(
-                (relatedCreator) => (
+                (relatedArtist) => (
                   <CreatorCard
-                    key={
-                      relatedCreator.id
-                    }
-                    {...relatedCreator}
+                    key={relatedArtist.id}
+                    {...relatedArtist}
                   />
                 ),
               )}

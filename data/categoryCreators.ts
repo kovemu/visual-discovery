@@ -553,6 +553,32 @@ export const categoryCreators: Creator[] = [
     tags: ["Abstract", "Digital Art", "Experimental"],
     followers: 5800,
   },
+  {
+  id: "xlov",
+  name: "XLOV",
+  category: "Music",
+  description:
+    "Korean performance group known for choreography-driven stage content and short-form videos.",
+
+  image: "https://i.namu.wiki/i/8I_BQa8eJTYgT6J4HNVnSXQm6PMegykH0aGFX6GWmbsO3Fo12H2DRo28I8vE7YmYurJcn6LfPCt6ASZz6EbMdMr-GmDUnwgEaQL2hnxqohMajA8ibcvn4u2ZPzjNqr4nxKmxnJdEUK2FJT5n5H-DXQ.webp",
+
+  platforms: ["YouTube", "Instagram"],
+
+  platformLinks: [
+    {
+      name: "YouTube",
+      url: "www.youtube.com/@XLOV_official",
+    },
+    {
+      name: "Instagram",
+      url: "instagram.com/xlov_official",
+    },
+  ],
+
+  tags: ["Music", "Performance", "K-pop"],
+  followers: 0,
+  badge: "Curated by Kovemu",
+}
 ];
 
 export function getCategoryDemoCreators(slug: string): Creator[] {
