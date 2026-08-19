@@ -59,6 +59,11 @@ export async function PATCH(
       typeof body.category === "string"
         ? body.category.trim()
         : "";
+    
+    const tagline =
+      typeof body.tagline === "string"
+        ? body.tagline.trim()
+        : "";
 
     const bio =
       typeof body.bio === "string"
@@ -74,6 +79,24 @@ export async function PATCH(
       typeof body.coverImage === "string"
         ? body.coverImage.trim()
         : "";
+    
+    const coverPositionX =
+    typeof body.coverPositionX === "number"
+    ? Math.round(
+        Math.min(
+        Math.max(0, body.coverPositionX),
+    ),
+      )
+    : 50;
+
+    const coverPositionY =
+    typeof body.coverPositionY === "number"
+    ? Math.round(
+        Math.min(
+        Math.max(0, body.coverPositionY),
+      ),
+    ) 
+    : 50;
 
     const youtubeUrl =
       typeof body.youtubeUrl === "string"
@@ -146,11 +169,14 @@ export async function PATCH(
           name,
           username: username || null,
           category,
+          tagline: tagline || null,
           bio: bio || null,
           profile_image:
             profileImage || null,
           cover_image:
             coverImage || null,
+          cover_position_x: coverPositionX,
+          cover_position_y: coverPositionY,
           tags,
           youtube_url:
             youtubeUrl || null,
@@ -164,9 +190,12 @@ export async function PATCH(
           name,
           username,
           category,
+          tagline,
           bio,
           profile_image,
           cover_image,
+          cover_position_x,
+          cover_position_y,
           tags,
           youtube_url,
           instagram_url,
@@ -196,6 +225,159 @@ export async function PATCH(
   } catch (error) {
     console.error(
       "UPDATE ARTIST SERVER ERROR:",
+      error,
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Unexpected server error.",
+      },
+      { status: 500 },
+    );
+  }
+}
+export async function DELETE(
+  _request: NextRequest,
+  { params }: RouteContext,
+) {
+  try {
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        {
+          error:
+            "Supabase server configuration is missing.",
+        },
+        { status: 500 },
+      );
+    }
+
+    const { id } = await params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          error: "Artist ID is required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const supabaseAdmin =
+      createClient(
+        supabaseUrl,
+        serviceRoleKey,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        },
+      );
+
+    /*
+      1. Artist의 Works 확인
+    */
+    const {
+      data: works,
+      error: worksLoadError,
+    } = await supabaseAdmin
+      .from("works")
+      .select(`
+        id,
+        source,
+        source_id
+      `)
+      .eq("artist_id", id);
+
+    if (worksLoadError) {
+      return NextResponse.json(
+        {
+          error:
+            worksLoadError.message,
+        },
+        { status: 400 },
+      );
+    }
+
+    /*
+      2. 직접 업로드 이미지라면
+         Storage에서도 제거
+    */
+    const storagePaths =
+      (works ?? [])
+        .filter(
+          (work) =>
+            work.source === "upload" &&
+            work.source_id,
+        )
+        .map(
+          (work) =>
+            work.source_id as string,
+        );
+
+    if (storagePaths.length > 0) {
+      const {
+        error: storageError,
+      } =
+        await supabaseAdmin.storage
+          .from("works")
+          .remove(storagePaths);
+
+      if (storageError) {
+        console.error(
+          "DELETE ARTIST STORAGE ERROR:",
+          storageError,
+        );
+      }
+    }
+
+    /*
+      3. Works 삭제
+    */
+    const {
+      error: worksDeleteError,
+    } = await supabaseAdmin
+      .from("works")
+      .delete()
+      .eq("artist_id", id);
+
+    if (worksDeleteError) {
+      return NextResponse.json(
+        {
+          error:
+            worksDeleteError.message,
+        },
+        { status: 400 },
+      );
+    }
+
+    /*
+      4. Artist 삭제
+    */
+    const {
+      error: artistDeleteError,
+    } = await supabaseAdmin
+      .from("creators")
+      .delete()
+      .eq("id", id);
+
+    if (artistDeleteError) {
+      return NextResponse.json(
+        {
+          error:
+            artistDeleteError.message,
+        },
+        { status: 400 },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+    });
+  } catch (error) {
+    console.error(
+      "DELETE ARTIST SERVER ERROR:",
       error,
     );
 

@@ -1,13 +1,19 @@
-import CreatorCard from "@/components/CreatorCard";
 import Header from "@/components/Header";
 import FeaturedWorksCarousel from "@/components/artist/FeaturedWorksCarousel";
 import LatestWorksCarousel from "@/components/artist/LatestWorksCarousel";
+import ArtistVote from "@/components/artist/ArtistVote";
+import ProfileMyPicks from "@/components/artist/ProfileMyPicks";
 
 import {
   allCreators,
   getCreatorById,
   type Creator,
 } from "@/data/creators";
+import {
+  ExternalLink,
+  Camera,
+  Play,
+} from "lucide-react";
 
 import { categoryCreators } from "@/data/categoryCreators";
 import type { DemoWork } from "@/data/discoverWorks";
@@ -49,9 +55,7 @@ type PlatformItem =
       url: string;
     };
 
-function normalizeCategory(category: string) {
-  return category.toLowerCase();
-}
+
 
 /*
   기존 Demo Artist 데이터 통합
@@ -72,19 +76,7 @@ function getDemoCreatorById(id: string) {
   );
 }
 
-function getRelatedCreators(
-  creatorId: string,
-  category: string,
-) {
-  return demoCreators
-    .filter(
-      (creator) =>
-        creator.id !== creatorId &&
-        normalizeCategory(creator.category) ===
-          normalizeCategory(category),
-    )
-    .slice(0, 4);
-}
+
 
 function getPlatformName(platform: PlatformItem) {
   if (typeof platform === "string") {
@@ -108,6 +100,7 @@ function getPlatformUrl(platform: PlatformItem) {
 
   return `https://${platform.url}`;
 }
+
 
 export async function generateStaticParams() {
   return demoCreators.map((creator) => ({
@@ -134,9 +127,12 @@ export default async function CreatorPage({
           username,
           name,
           category,
+          tagline,
           bio,
           profile_image,
           cover_image,
+          cover_position_x,
+          cover_position_y,
           tags,
           youtube_url,
           instagram_url,
@@ -180,16 +176,28 @@ export default async function CreatorPage({
     rawCategory.charAt(0).toUpperCase() +
     rawCategory.slice(1);
 
-  const artistDescription =
+  const artistTagline =
+    dbCreator?.tagline ||
+    "Discover this artist on Kovemu.";
+  
+    const artistDescription =
     dbCreator?.bio ||
     demoCreator?.description ||
-    "Artist on Kovemu.";
+    "On Kovemu.";
 
-  const heroImage =
-    dbCreator?.cover_image ||
-    dbCreator?.profile_image ||
-    demoCreator?.image ||
-    null;
+ const heroImage =
+  dbCreator?.cover_image ||
+  demoCreator?.image ||
+  null;
+
+  const profileImage =
+  dbCreator?.profile_image || null;
+  
+  const coverPositionX =
+  dbCreator?.cover_position_x ?? 50;
+
+  const coverPositionY =
+  dbCreator?.cover_position_y ?? 50;
 
   /*
     DB tags 우선.
@@ -408,11 +416,7 @@ export default async function CreatorPage({
       return bTime - aTime;
     });
 
-  const relatedCreators =
-    getRelatedCreators(
-      artistId,
-      artistCategory,
-    );
+
 
   /*
     Curated 여부는 이제 DB의 is_curated 기준.
@@ -421,6 +425,7 @@ export default async function CreatorPage({
     dbCreator?.is_curated ?? true;
 
   return (
+    <>
     <main className="min-h-screen bg-white">
       <Header />
 
@@ -428,12 +433,15 @@ export default async function CreatorPage({
       <section className="border-b border-gray-100 bg-gray-950">
         <div className="relative mx-auto h-[430px] max-w-7xl overflow-hidden">
           {heroImage && (
-            <img
-              src={heroImage}
-              alt={`${artistName} profile`}
-              className="absolute inset-0 h-full w-full object-cover opacity-65"
-            />
-          )}
+  <img
+    src={heroImage}
+    alt={`${artistName} cover`}
+    className="absolute inset-0 h-full w-full object-cover opacity-65"
+    style={{
+      objectPosition: `${coverPositionX}% ${coverPositionY}%`,
+    }}
+  />
+)}
 
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20" />
 
@@ -450,42 +458,52 @@ export default async function CreatorPage({
                 {artistCategory}
               </p>
 
-              <h1 className="mt-3 text-5xl font-black tracking-tight md:text-6xl">
-                {artistName}
-              </h1>
+              <div className="mt-3 flex items-center gap-3">
+  {profileImage && (
+    <img
+      src={profileImage}
+      alt={`${artistName} profile`}
+      className="h-16 w-16 shrink-0 rounded-full border-2 border-white/25 object-cover"
+    />
+  )}
 
-              {dbCreator?.username && (
-                <p className="mt-2 text-sm font-semibold text-white/60">
-                  @{dbCreator.username}
-                </p>
-              )}
+  <div>
+    <h1 className="text-5xl font-black tracking-tight md:text-6xl">
+      {artistName}
+    </h1>
+
+    {dbCreator?.username && (
+      <p className="mt-2 text-sm font-semibold text-white/60">
+        @{dbCreator.username}
+      </p>
+    )}
+  </div>
+</div>
 
               <p className="mt-5 max-w-xl text-lg leading-8 text-white/85">
-                {artistDescription}
+                {artistTagline}
               </p>
 
               {isCurated && (
-                <div className="mt-6">
-                  <span className="inline-flex rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-bold text-white">
-                    Curated by Kovemu
-                  </span>
-                </div>
-              )}
+  <p className="mt-5 text-xs font-medium text-white/45">
+    Curated by Kovemu
+  </p>
+)}
             </div>
           </div>
         </div>
       </section>
 
       <div className="mx-auto max-w-7xl px-6 py-12 lg:px-10">
-        <div className="grid gap-12 lg:grid-cols-[1fr_300px]">
-          <div>
+        <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_300px]">
+           <div className="min-w-0">
             {/* About */}
             <section>
               <h2 className="text-3xl font-black tracking-tight text-gray-950">
                 About
               </h2>
 
-              <p className="mt-5 max-w-3xl text-lg leading-8 text-gray-600">
+              <p className="mt-5 max-w-3xl whitespace-pre-line text-lg leading-8 text-gray-600">
                 {artistDescription}
               </p>
 
@@ -547,8 +565,17 @@ export default async function CreatorPage({
           </div>
 
           {/* Artist Links */}
-          <aside>
-            <div className="rounded-2xl border border-gray-200 bg-white p-6">
+          {/* Artist Sidebar */}
+<aside className="space-y-5">
+  {dbCreator && (
+    <ArtistVote
+      artistId={artistId}
+      artistName={artistName}
+      category={artistCategory}
+    />
+  )}
+
+  <div className="rounded-2xl border border-gray-200 bg-white p-6">
               <h2 className="text-xl font-black text-gray-950">
                 Artist Links
               </h2>
@@ -576,11 +603,32 @@ export default async function CreatorPage({
                             rel="noopener noreferrer"
                             className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-gray-200 px-4 py-3 font-semibold text-gray-700 transition hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-700"
                           >
-                            <span>
-                              {name}
-                            </span>
+                           <span className="flex items-center gap-3">
+  {name.toLowerCase() === "youtube" ? (
+    <Play
+      size={18}
+      strokeWidth={1.8}
+    />
+  ) : name.toLowerCase() === "instagram" ? (
+    <Camera
+      size={18}
+      strokeWidth={1.8}
+    />
+  ) : (
+    <ExternalLink
+      size={18}
+      strokeWidth={1.8}
+    />
+  )}
 
-                            <span>↗</span>
+  {name}
+</span>
+
+
+<ExternalLink
+  size={16}
+  strokeWidth={1.8}
+/>
                           </a>
                         );
                       }
@@ -616,33 +664,10 @@ export default async function CreatorPage({
           </aside>
         </div>
 
-        {/* Related Artists */}
-        {relatedCreators.length > 0 && (
-          <section className="mt-20 border-t border-gray-100 pt-12">
-            <div className="mb-7">
-              <h2 className="text-3xl font-black tracking-tight text-gray-950">
-                Discover More
-              </h2>
-
-              <p className="mt-2 text-gray-500">
-                More artists you may want
-                to explore.
-              </p>
-            </div>
-
-            <div className="flex gap-5 overflow-x-auto px-1 pb-6 pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {relatedCreators.map(
-                (relatedArtist) => (
-                  <CreatorCard
-                    key={relatedArtist.id}
-                    {...relatedArtist}
-                  />
-                ),
-              )}
-            </div>
-          </section>
-        )}
+       
       </div>
     </main>
+    <ProfileMyPicks />
+    </>
   );
 }

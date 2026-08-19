@@ -157,7 +157,7 @@ export default function FeaturedWorksCarousel({
 
             {work.caption && (
               <div className="p-4">
-                <p className="font-bold text-gray-950">
+                <p className="line-clamp-1 text-sm font-semibold leading-5 text-gray-950">
                   {work.caption}
                 </p>
               </div>

@@ -46,9 +46,18 @@ export async function getRealDiscoverWorks(): Promise<FeedItem[]> {
     });
 
   if (error) {
-    console.error("LOAD DISCOVER WORKS ERROR:", error);
-    return [];
-  }
+  console.log(
+    "LOAD DISCOVER WORKS ERROR:",
+    {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    },
+  );
+
+  return [];
+}
 
   if (!data) {
     return [];

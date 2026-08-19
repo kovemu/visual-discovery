@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import { createClient } from "@/lib/supabase/client";
 
 type YouTubeVideo = {
@@ -33,247 +38,1309 @@ type NewArtistForm = {
   category: string;
 };
 
-type TabType = "shorts" | "videos";
+type ImageDraft = {
+  id: string;
+
+  file: File;
+  previewUrl: string;
+
+  caption: string;
+  sourceUrl: string;
+  publishedAt: string;
+};
+
+type ExternalImageDraft = {
+  id: string;
+
+  imageUrl: string;
+  sourceUrl: string;
+
+  caption: string;
+  publishedAt: string;
+};
+
+type TabType =
+  | "shorts"
+  | "videos"
+  | "additional"
+  | "images";
+
+const MAX_IMAGE_SIZE = 1800;
+const WEBP_QUALITY = 0.82;
 
 export default function AdminImportPage() {
-  const supabase = createClient();
+  const supabase =
+    useMemo(
+      () => createClient(),
+      [],
+    );
 
-  const [channelUrl, setChannelUrl] = useState("");
-  const [channel, setChannel] = useState<YouTubeChannel | null>(null);
+  /*
+    Channel
+  */
+  const [
+    channelUrl,
+    setChannelUrl,
+  ] = useState("");
 
-  const [shorts, setShorts] = useState<YouTubeVideo[]>([]);
-  const [videos, setVideos] = useState<YouTubeVideo[]>([]);
+  const [
+    channel,
+    setChannel,
+  ] =
+    useState<YouTubeChannel | null>(
+      null,
+    );
 
-  const [activeTab, setActiveTab] = useState<TabType>("shorts");
+  const [
+    shorts,
+    setShorts,
+  ] =
+    useState<YouTubeVideo[]>(
+      [],
+    );
 
-  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(
-    new Set()
-  );
+  const [
+    videos,
+    setVideos,
+  ] =
+    useState<YouTubeVideo[]>(
+      [],
+    );
 
-  const [artists, setArtists] = useState<Artist[]>([]);
-  const [selectedArtistId, setSelectedArtistId] = useState("");
+  /*
+    Additional
+  */
+  const [
+    additionalUrl,
+    setAdditionalUrl,
+  ] = useState("");
 
-  const [showCreateArtist, setShowCreateArtist] = useState(false);
+  const [
+    additionalWorks,
+    setAdditionalWorks,
+  ] =
+    useState<YouTubeVideo[]>(
+      [],
+    );
 
-  const [newArtist, setNewArtist] = useState<NewArtistForm>({
-    name: "",
-    username: "",
-    category: "music",
-  });
+  /*
+    Images
+  */
+  const [
+    imageDrafts,
+    setImageDrafts,
+  ] =
+    useState<ImageDraft[]>(
+      [],
+    );
 
-  const [creatingArtist, setCreatingArtist] = useState(false);
-  const [importingWorks, setImportingWorks] = useState(false);
+  const [
+    selectedImageIds,
+    setSelectedImageIds,
+  ] =
+    useState<Set<string>>(
+      new Set(),
+    );
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  /*
+  External Images
+*/
 
+const [
+  externalImageUrl,
+  setExternalImageUrl,
+] = useState("");
+
+const [
+  externalSourceUrl,
+  setExternalSourceUrl,
+] = useState("");
+
+const [
+  externalCaption,
+  setExternalCaption,
+] = useState("");
+
+const [
+  externalPublishedAt,
+  setExternalPublishedAt,
+] = useState(
+  new Date()
+    .toISOString()
+    .slice(0, 10),
+);
+
+const [
+  externalImageDrafts,
+  setExternalImageDrafts,
+] =
+  useState<
+    ExternalImageDraft[]
+  >([]);
+
+  /*
+    Tabs
+  */
+  const [
+    activeTab,
+    setActiveTab,
+  ] =
+    useState<TabType>(
+      "shorts",
+    );
+
+  /*
+    Video selection
+  */
+  const [
+    selectedVideoIds,
+    setSelectedVideoIds,
+  ] =
+    useState<Set<string>>(
+      new Set(),
+    );
+
+  /*
+    Artist
+  */
+  const [
+    artists,
+    setArtists,
+  ] =
+    useState<Artist[]>(
+      [],
+    );
+
+  const [
+    selectedArtistId,
+    setSelectedArtistId,
+  ] = useState("");
+
+  const [
+    showCreateArtist,
+    setShowCreateArtist,
+  ] =
+    useState(false);
+
+  const [
+    newArtist,
+    setNewArtist,
+  ] =
+    useState<NewArtistForm>({
+      name: "",
+      username: "",
+      category:
+        "music",
+    });
+
+  /*
+    Loading
+  */
+  const [
+    loading,
+    setLoading,
+  ] =
+    useState(false);
+
+  const [
+    loadingAdditional,
+    setLoadingAdditional,
+  ] =
+    useState(false);
+
+  const [
+    preparingImages,
+    setPreparingImages,
+  ] =
+    useState(false);
+
+  const [
+    creatingArtist,
+    setCreatingArtist,
+  ] =
+    useState(false);
+
+  const [
+    importingWorks,
+    setImportingWorks,
+  ] =
+    useState(false);
+
+  /*
+    Messages
+  */
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  const [
+    message,
+    setMessage,
+  ] = useState("");
+
+  /*
+    Artists
+  */
   useEffect(() => {
     async function loadArtists() {
-      const { data, error } = await supabase
-        .from("creators")
-        .select("id, name, username")
-        .order("name", { ascending: true });
+      const {
+        data,
+        error,
+      } =
+        await supabase
+          .from(
+            "creators",
+          )
+          .select(
+            "id, name, username",
+          )
+          .order(
+            "name",
+            {
+              ascending:
+                true,
+            },
+          );
 
       if (error) {
-        console.error("Failed to load artists:", error);
+        console.error(
+          "Failed to load artists:",
+          error,
+        );
+
         return;
       }
 
-      setArtists(data ?? []);
+      setArtists(
+        data ?? [],
+      );
     }
 
     loadArtists();
-  }, []);
+  }, [supabase]);
 
+  /*
+    Channel
+  */
   async function loadVideos() {
-    if (!channelUrl.trim()) {
-      setError("YouTube channel URL을 입력해주세요.");
+    if (
+      !channelUrl.trim()
+    ) {
+      setError(
+        "YouTube channel URL을 입력해주세요.",
+      );
+
       return;
     }
 
     setLoading(true);
     setError("");
     setMessage("");
+
     setChannel(null);
     setShorts([]);
     setVideos([]);
-    setSelectedVideoIds(new Set());
 
     try {
-      const response = await fetch(
-        `/api/youtube/channel?url=${encodeURIComponent(channelUrl)}`
-      );
+      const response =
+        await fetch(
+          `/api/youtube/channel?url=${encodeURIComponent(
+            channelUrl,
+          )}`,
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.error || "YouTube 영상을 불러오지 못했습니다."
+          data.error ||
+            "YouTube 영상을 불러오지 못했습니다.",
         );
       }
 
-      setChannel(data.channel);
-      setShorts(data.shorts ?? []);
-      setVideos(data.videos ?? []);
-      setActiveTab("shorts");
+     setChannel(
+  data.channel,
+);
+
+/*
+  YouTube 채널 정보를
+  Artist 생성 폼에 자동 입력
+*/
+setNewArtist({
+  name:
+    data.channel?.title ??
+    "",
+
+  username:
+    extractYouTubeHandle(
+      channelUrl,
+    ),
+
+  category: "music",
+});
+
+setShorts(
+  data.shorts ?? [],
+);
+
+      setVideos(
+        data.videos ?? [],
+      );
+
+      setActiveTab(
+        "shorts",
+      );
+
+      setMessage(
+        "YouTube 채널을 불러왔습니다.",
+      );
     } catch (error) {
-      if (error instanceof Error) {
-        setError(error.message);
+      if (
+        error instanceof Error
+      ) {
+        setError(
+          error.message,
+        );
       } else {
-        setError("알 수 없는 오류가 발생했습니다.");
+        setError(
+          "YouTube 영상을 불러오지 못했습니다.",
+        );
       }
     } finally {
       setLoading(false);
     }
   }
 
-  function toggleVideo(videoId: string) {
-    setSelectedVideoIds((current) => {
-      const next = new Set(current);
+  /*
+    Additional
+  */
+  async function loadAdditional() {
+    if (
+      !additionalUrl.trim()
+    ) {
+      setError(
+        "YouTube Video 또는 Playlist URL을 입력해주세요.",
+      );
 
-      if (next.has(videoId)) {
-        next.delete(videoId);
-      } else {
-        next.add(videoId);
+      return;
+    }
+
+    setLoadingAdditional(
+      true,
+    );
+
+    setError("");
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          `/api/youtube/additional?url=${encodeURIComponent(
+            additionalUrl,
+          )}`,
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "추가 영상을 불러오지 못했습니다.",
+        );
       }
 
-      return next;
-    });
+      const loaded =
+        (data.works ??
+          []) as YouTubeVideo[];
+
+      setAdditionalWorks(
+        (current) => {
+          const map =
+            new Map<
+              string,
+              YouTubeVideo
+            >();
+
+          for (
+            const video of current
+          ) {
+            map.set(
+              video.id,
+              video,
+            );
+          }
+
+          for (
+            const video of loaded
+          ) {
+            map.set(
+              video.id,
+              video,
+            );
+          }
+
+          return Array.from(
+            map.values(),
+          );
+        },
+      );
+
+      setAdditionalUrl(
+        "",
+      );
+
+      setActiveTab(
+        "additional",
+      );
+
+      setMessage(
+        `${loaded.length}개의 Additional Work를 불러왔습니다.`,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error
+      ) {
+        setError(
+          error.message,
+        );
+      } else {
+        setError(
+          "추가 영상을 불러오지 못했습니다.",
+        );
+      }
+    } finally {
+      setLoadingAdditional(
+        false,
+      );
+    }
+  }
+
+  /*
+    Images
+  */
+  async function handleImageFiles(
+    files: FileList | null,
+  ) {
+    if (
+      !files ||
+      files.length === 0
+    ) {
+      return;
+    }
+
+    setPreparingImages(
+      true,
+    );
+
+    setError("");
+    setMessage("");
+
+    try {
+      const nextDrafts: ImageDraft[] =
+        [];
+
+      for (
+        const originalFile of
+          Array.from(files)
+      ) {
+        if (
+          !originalFile.type.startsWith(
+            "image/",
+          )
+        ) {
+          continue;
+        }
+
+        const convertedFile =
+          await convertImageToWebP(
+            originalFile,
+          );
+
+        const id =
+          crypto.randomUUID();
+
+        nextDrafts.push({
+          id,
+
+          file:
+            convertedFile,
+
+          previewUrl:
+            URL.createObjectURL(
+              convertedFile,
+            ),
+
+          caption: "",
+
+          sourceUrl: "",
+
+          publishedAt:
+            new Date()
+              .toISOString()
+              .slice(
+                0,
+                10,
+              ),
+        });
+      }
+
+      setImageDrafts(
+        (current) => [
+          ...current,
+          ...nextDrafts,
+        ],
+      );
+
+      setSelectedImageIds(
+        (current) => {
+          const next =
+            new Set(
+              current,
+            );
+
+          for (
+            const draft of
+              nextDrafts
+          ) {
+            next.add(
+              draft.id,
+            );
+          }
+
+          return next;
+        },
+      );
+
+      setActiveTab(
+        "images",
+      );
+
+      setMessage(
+        `${nextDrafts.length}개의 이미지를 준비했습니다.`,
+      );
+    } catch (error) {
+      console.error(
+        error,
+      );
+
+      setError(
+        "이미지 처리 중 오류가 발생했습니다.",
+      );
+    } finally {
+      setPreparingImages(
+        false,
+      );
+    }
+  }
+
+  function updateImageDraft(
+    id: string,
+    patch: Partial<ImageDraft>,
+  ) {
+    setImageDrafts(
+      (current) =>
+        current.map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  ...patch,
+                }
+              : item,
+        ),
+    );
+  }
+
+  function removeImageDraft(
+    draft: ImageDraft,
+  ) {
+    URL.revokeObjectURL(
+      draft.previewUrl,
+    );
+
+    setImageDrafts(
+      (current) =>
+        current.filter(
+          (item) =>
+            item.id !==
+            draft.id,
+        ),
+    );
+
+    setSelectedImageIds(
+      (current) => {
+        const next =
+          new Set(
+            current,
+          );
+
+        next.delete(
+          draft.id,
+        );
+
+        return next;
+      },
+    );
+  }
+
+  function toggleImage(
+    id: string,
+  ) {
+    setSelectedImageIds(
+      (current) => {
+        const next =
+          new Set(
+            current,
+          );
+
+        if (
+          next.has(id)
+        ) {
+          next.delete(
+            id,
+          );
+        } else {
+          next.add(
+            id,
+          );
+        }
+
+        return next;
+      },
+    );
+  }
+/*
+  External Images
+*/
+function addExternalImage() {
+  const imageUrl =
+    externalImageUrl.trim();
+
+  const sourceUrl =
+    externalSourceUrl.trim();
+
+  const caption =
+    externalCaption.trim();
+
+  if (!imageUrl) {
+    setError(
+      "Image URL을 입력해주세요.",
+    );
+
+    return;
+  }
+
+  try {
+    const parsed =
+      new URL(imageUrl);
+
+    if (
+      parsed.protocol !== "http:" &&
+      parsed.protocol !== "https:"
+    ) {
+      throw new Error();
+    }
+  } catch {
+    setError(
+      "올바른 Image URL을 입력해주세요.",
+    );
+
+    return;
+  }
+
+  /*
+    현재 Importer 내부 중복 방지
+  */
+  const alreadyExists =
+    externalImageDrafts.some(
+      (draft) =>
+        draft.imageUrl ===
+        imageUrl,
+    );
+
+  if (alreadyExists) {
+    setError(
+      "이미 추가된 이미지입니다.",
+    );
+
+    return;
+  }
+
+  const draft: ExternalImageDraft = {
+    id:
+      crypto.randomUUID(),
+
+    imageUrl,
+
+    sourceUrl,
+
+    caption,
+
+    publishedAt:
+      externalPublishedAt,
+  };
+
+  setExternalImageDrafts(
+    (current) => [
+      ...current,
+      draft,
+    ],
+  );
+
+  setExternalImageUrl("");
+  setExternalSourceUrl("");
+  setExternalCaption("");
+
+  setActiveTab(
+    "images",
+  );
+
+  setError("");
+
+  setMessage(
+    "External Image를 추가했습니다.",
+  );
+}
+
+function updateExternalImageDraft(
+  id: string,
+  patch: Partial<ExternalImageDraft>,
+) {
+  setExternalImageDrafts(
+    (current) =>
+      current.map(
+        (draft) =>
+          draft.id === id
+            ? {
+                ...draft,
+                ...patch,
+              }
+            : draft,
+      ),
+  );
+}
+
+function removeExternalImageDraft(
+  id: string,
+) {
+  setExternalImageDrafts(
+    (current) =>
+      current.filter(
+        (draft) =>
+          draft.id !== id,
+      ),
+  );
+}
+  /*
+    Video selection
+  */
+  function toggleVideo(
+    videoId: string,
+  ) {
+    setSelectedVideoIds(
+      (current) => {
+        const next =
+          new Set(
+            current,
+          );
+
+        if (
+          next.has(
+            videoId,
+          )
+        ) {
+          next.delete(
+            videoId,
+          );
+        } else {
+          next.add(
+            videoId,
+          );
+        }
+
+        return next;
+      },
+    );
   }
 
   function clearSelection() {
-    setSelectedVideoIds(new Set());
+    setSelectedVideoIds(
+      new Set(),
+    );
+
+    setSelectedImageIds(
+      new Set(),
+    );
   }
 
+  /*
+    Create Artist
+  */
   async function createArtist() {
-  if (!newArtist.name.trim()) {
-    setError("Artist name을 입력해주세요.");
-    return;
-  }
+    if (
+      !newArtist.name.trim()
+    ) {
+      setError(
+        "Artist name을 입력해주세요.",
+      );
 
-  setCreatingArtist(true);
-  setError("");
-  setMessage("");
+      return;
+    }
 
-  try {
-    const response = await fetch("/api/admin/artists", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: newArtist.name.trim(),
-        username: newArtist.username.trim(),
-        category: newArtist.category,
-      }),
-    });
+    setCreatingArtist(
+      true,
+    );
 
-    const data = await response.json();
+    setError("");
+    setMessage("");
 
-    if (!response.ok) {
-      throw new Error(
-        data.error || "Artist 생성에 실패했습니다."
+    try {
+      const response =
+        await fetch(
+          "/api/admin/artists",
+          {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+           body:
+  JSON.stringify(
+    {
+      name:
+        newArtist.name.trim(),
+
+      username:
+        newArtist.username.trim(),
+
+      category:
+        newArtist.category,
+
+      /*
+        YouTube에서 자동 입력
+      */
+      bio:
+        "",
+
+      profileImage:
+        channel?.thumbnail ??
+        "",
+
+      youtubeUrl:
+        channelUrl.trim(),
+    },
+  ),
+          },
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Artist 생성에 실패했습니다.",
+        );
+      }
+
+      const artist =
+        data.artist as Artist;
+
+      setArtists(
+        (current) =>
+          [
+            ...current,
+            artist,
+          ].sort(
+            (a, b) =>
+              a.name.localeCompare(
+                b.name,
+              ),
+          ),
+      );
+
+      setSelectedArtistId(
+        artist.id,
+      );
+
+      setNewArtist({
+        name: "",
+        username: "",
+        category:
+          "music",
+      });
+
+      setShowCreateArtist(
+        false,
+      );
+
+      setMessage(
+        `${artist.name} Artist가 생성되었습니다.`,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error
+      ) {
+        setError(
+          error.message,
+        );
+      }
+    } finally {
+      setCreatingArtist(
+        false,
       );
     }
-
-    const artist = data.artist;
-
-    setArtists((current) =>
-      [...current, artist].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      )
-    );
-
-    setSelectedArtistId(artist.id);
-
-    setNewArtist({
-      name: "",
-      username: "",
-      category: "music",
-    });
-
-    setShowCreateArtist(false);
-
-    setMessage(
-      `${artist.name} Artist가 생성되었습니다.`
-    );
-  } catch (error) {
-    console.error("Create artist error:", error);
-
-    if (error instanceof Error) {
-      setError(error.message);
-    } else {
-      setError("Artist 생성에 실패했습니다.");
-    }
-  } finally {
-    setCreatingArtist(false);
-  }
-}
-async function importWorks() {
-  if (!selectedArtistId) {
-    setError("Artist를 선택해주세요.");
-    return;
   }
 
-  if (selectedWorks.length === 0) {
-    setError("Import할 Work를 선택해주세요.");
-    return;
-  }
-
-  setImportingWorks(true);
-  setError("");
-  setMessage("");
-
-  try {
-    const response = await fetch("/api/admin/import-works", {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-      },
-
-      body: JSON.stringify({
-        artistId: selectedArtistId,
-        works: selectedWorks,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        data.error || "Work Import에 실패했습니다."
-      );
-    }
-
-    setMessage(
-      `${data.importedCount}개의 Work가 Import되었습니다.`
-    );
-
-    setSelectedVideoIds(new Set());
-  } catch (error) {
-    console.error("Import works error:", error);
-
-    if (error instanceof Error) {
-      setError(error.message);
-    } else {
-      setError("Work Import에 실패했습니다.");
-    }
-  } finally {
-    setImportingWorks(false);
-  }
-}
+  /*
+    Video data
+  */
   const displayedVideos =
-    activeTab === "shorts" ? shorts : videos;
+    activeTab ===
+    "shorts"
+      ? shorts
+      : activeTab ===
+          "videos"
+        ? videos
+        : additionalWorks;
 
-  const totalWorks = shorts.length + videos.length;
+  const allVideoWorks =
+    Array.from(
+      new Map(
+        [
+          ...shorts,
+          ...videos,
+          ...additionalWorks,
+        ].map(
+          (video) => [
+            video.id,
+            video,
+          ],
+        ),
+      ).values(),
+    );
 
-  const allWorks = [...shorts, ...videos];
+  const selectedVideoWorks =
+    allVideoWorks.filter(
+      (video) =>
+        selectedVideoIds.has(
+          video.id,
+        ),
+    );
 
-  const selectedWorks = allWorks.filter((video) =>
-    selectedVideoIds.has(video.id)
-  );
+  const selectedImageDrafts =
+    imageDrafts.filter(
+      (draft) =>
+        selectedImageIds.has(
+          draft.id,
+        ),
+    );
+
+  const selectedCount =
+  selectedVideoWorks.length +
+  selectedImageDrafts.length +
+  externalImageDrafts.length;
+  /*
+    Import
+  */
+  async function importSelectedWorks() {
+    if (
+      !selectedArtistId
+    ) {
+      setError(
+        "Artist를 선택해주세요.",
+      );
+
+      return;
+    }
+
+    if (
+      selectedCount === 0
+    ) {
+      setError(
+        "Import할 Work를 선택해주세요.",
+      );
+
+      return;
+    }
+
+    setImportingWorks(
+      true,
+    );
+
+    setError("");
+    setMessage("");
+
+    try {
+      let videoImported =
+        0;
+
+      let imageImported =
+        0;
+      
+      let externalImageImported =
+        0;
+
+      /*
+        YouTube
+      */
+      if (
+        selectedVideoWorks.length >
+        0
+      ) {
+        const response =
+          await fetch(
+            "/api/admin/import-works",
+            {
+              method:
+                "POST",
+
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+
+              body:
+                JSON.stringify(
+                  {
+                    artistId:
+                      selectedArtistId,
+
+                    works:
+                      selectedVideoWorks,
+                  },
+                ),
+            },
+          );
+
+        const data =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              "Video Import에 실패했습니다.",
+          );
+        }
+
+        videoImported =
+          data.importedCount ??
+          0;
+      }
+
+      /*
+        Images
+      */
+      if (
+        selectedImageDrafts.length >
+        0
+      ) {
+        const formData =
+          new FormData();
+
+        formData.append(
+          "artistId",
+          selectedArtistId,
+        );
+
+        formData.append(
+          "metadata",
+          JSON.stringify(
+            selectedImageDrafts.map(
+              (draft) => ({
+                clientId:
+                  draft.id,
+
+                caption:
+                  draft.caption,
+
+                sourceUrl:
+                  draft.sourceUrl,
+
+                publishedAt:
+                  draft.publishedAt,
+              }),
+            ),
+          ),
+        );
+
+        for (
+          const draft of
+            selectedImageDrafts
+        ) {
+          formData.append(
+            "files",
+            draft.file,
+          );
+        }
+
+        const response =
+          await fetch(
+            "/api/admin/import-images",
+            {
+              method:
+                "POST",
+
+              body:
+                formData,
+            },
+          );
+
+        const data =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              "Image Import에 실패했습니다.",
+          );
+        }
+
+        imageImported =
+          data.importedCount ??
+          0;
+      }
+/*
+  External Images
+*/
+if (
+  externalImageDrafts.length >
+  0
+) {
+  const response =
+    await fetch(
+      "/api/admin/import-external-images",
+      {
+        method:
+          "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+
+        body:
+          JSON.stringify({
+            artistId:
+              selectedArtistId,
+
+            works:
+              externalImageDrafts.map(
+                (draft) => ({
+                  imageUrl:
+                    draft.imageUrl,
+
+                  sourceUrl:
+                    draft.sourceUrl,
+
+                  caption:
+                    draft.caption,
+
+                  publishedAt:
+                    draft.publishedAt,
+                }),
+              ),
+          }),
+      },
+    );
+
+  const data =
+    await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.error ||
+        "External Image Import에 실패했습니다.",
+    );
+  }
+
+  externalImageImported =
+    data.importedCount ??
+    0;
+}
+      setMessage(
+  `Import 완료 · Videos ${videoImported} · Upload Images ${imageImported} · External Images ${externalImageImported}`,
+);
+
+      setSelectedVideoIds(
+        new Set(),
+      );
+      setExternalImageDrafts(
+  [],
+);
+
+      /*
+        Import된 이미지 제거
+      */
+      for (
+        const draft of
+          selectedImageDrafts
+      ) {
+        URL.revokeObjectURL(
+          draft.previewUrl,
+        );
+      }
+
+      const importedIds =
+        new Set(
+          selectedImageDrafts.map(
+            (draft) =>
+              draft.id,
+          ),
+        );
+
+      setImageDrafts(
+        (current) =>
+          current.filter(
+            (draft) =>
+              !importedIds.has(
+                draft.id,
+              ),
+          ),
+      );
+
+      setSelectedImageIds(
+        new Set(),
+      );
+    } catch (error) {
+      console.error(
+        "IMPORT ERROR:",
+        error,
+      );
+
+      if (
+        error instanceof Error
+      ) {
+        setError(
+          error.message,
+        );
+      } else {
+        setError(
+          "Import에 실패했습니다.",
+        );
+      }
+    } finally {
+      setImportingWorks(
+        false,
+      );
+    }
+  }
+
+  const hasVideoWorks =
+    Boolean(channel) ||
+    additionalWorks.length >
+      0;
+
+  const hasAnyWorks =
+  hasVideoWorks ||
+  imageDrafts.length > 0 ||
+  externalImageDrafts.length > 0;
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-12">
@@ -284,130 +1351,309 @@ async function importWorks() {
         </p>
 
         <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
-          YouTube Importer
+          Work Importer
         </h1>
 
         <p className="mt-3 text-sm text-zinc-500">
-          YouTube 채널의 작품을 불러와 Kovemu에 등록합니다.
+          YouTube 영상과
+          이미지 작품을
+          Kovemu에
+          등록합니다.
         </p>
       </section>
 
-      {/* YouTube Import */}
+      {/* YouTube */}
       <section className="rounded-2xl border border-zinc-200 bg-white p-6">
-        <label
-          htmlFor="youtube-channel"
-          className="mb-2 block text-sm font-medium text-zinc-800"
-        >
-          YouTube Channel URL
-        </label>
+        <h2 className="text-lg font-semibold text-zinc-950">
+          YouTube Channel
+        </h2>
 
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <p className="mt-1 text-sm text-zinc-500">
+          Shorts와 일반
+          영상을 자동으로
+          불러옵니다.
+        </p>
+
+        <div className="mt-5 flex gap-3">
           <input
-            id="youtube-channel"
-            type="text"
             value={channelUrl}
             onChange={(event) =>
-              setChannelUrl(event.target.value)
+              setChannelUrl(
+                event.target.value,
+              )
             }
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                loadVideos();
-              }
-            }}
-            placeholder="https://www.youtube.com/@artist"
-            className="h-12 flex-1 rounded-xl border border-zinc-200 px-4 text-sm outline-none transition focus:border-zinc-400"
+            placeholder="https://youtube.com/@artist"
+            className="h-12 flex-1 rounded-xl border border-zinc-200 px-4 text-sm"
           />
 
           <button
             type="button"
             onClick={loadVideos}
             disabled={loading}
-            className="h-12 rounded-xl bg-zinc-950 px-6 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl bg-zinc-950 px-6 text-sm font-medium text-white"
           >
-            {loading ? "Loading..." : "Load videos"}
+            {loading
+              ? "Loading..."
+              : "Load"}
           </button>
         </div>
-
-        {error && (
-          <p className="mt-3 text-sm text-red-500">
-            {error}
-          </p>
-        )}
-
-        {message && (
-          <p className="mt-3 text-sm text-green-600">
-            {message}
-          </p>
-        )}
       </section>
 
-      {/* Channel Information */}
-      {channel && (
-        <section className="mt-8 flex items-center gap-4 border-b border-zinc-200 pb-8">
-          {channel.thumbnail && (
-            <img
-              src={channel.thumbnail}
-              alt={channel.title}
-              className="h-16 w-16 rounded-full object-cover"
-            />
-          )}
+      {/* Additional */}
+      <section className="mt-5 rounded-2xl border border-zinc-200 bg-white p-6">
+        <h2 className="text-lg font-semibold text-zinc-950">
+          Additional Video /
+          Playlist
+        </h2>
 
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-950">
-              {channel.title}
-            </h2>
+        <div className="mt-5 flex gap-3">
+          <input
+            value={
+              additionalUrl
+            }
+            onChange={(event) =>
+              setAdditionalUrl(
+                event.target.value,
+              )
+            }
+            placeholder="YouTube Video or Playlist URL"
+            className="h-12 flex-1 rounded-xl border border-zinc-200 px-4 text-sm"
+          />
 
-            <p className="mt-1 text-sm text-zinc-500">
-              {totalWorks} works loaded
+          <button
+            type="button"
+            onClick={
+              loadAdditional
+            }
+            disabled={
+              loadingAdditional
+            }
+            className="rounded-xl border border-zinc-950 px-6 text-sm font-medium"
+          >
+            {loadingAdditional
+              ? "Loading..."
+              : "Load"}
+          </button>
+        </div>
+      </section>
+
+      {/* Image Upload */}
+      <section className="mt-5 rounded-2xl border border-zinc-200 bg-white p-6">
+        <h2 className="text-lg font-semibold text-zinc-950">
+          Image Upload
+        </h2>
+
+        <p className="mt-1 text-sm text-zinc-500">
+          Art, Cosplay 등의
+          이미지 작품을
+          여러 장 선택할 수
+          있습니다.
+        </p>
+
+        <label className="mt-5 flex min-h-[120px] cursor-pointer items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 transition hover:border-zinc-400 hover:bg-zinc-100">
+          <div className="text-center">
+            <p className="text-sm font-medium text-zinc-800">
+              Select images
             </p>
 
             <p className="mt-1 text-xs text-zinc-400">
-              Shorts {shorts.length} · Videos {videos.length}
+              JPG / PNG /
+              WebP
             </p>
+
+            {preparingImages && (
+              <p className="mt-2 text-xs text-fuchsia-600">
+                Optimizing...
+              </p>
+            )}
           </div>
-        </section>
+
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            disabled={
+              preparingImages
+            }
+            onChange={(event) => {
+              handleImageFiles(
+                event.target.files,
+              );
+
+              event.target.value =
+                "";
+            }}
+            className="hidden"
+          />
+        </label>
+        <div className="my-6 flex items-center gap-4">
+  <div className="h-px flex-1 bg-zinc-200" />
+
+  <span className="text-xs font-medium uppercase tracking-wider text-zinc-400">
+    or
+  </span>
+
+  <div className="h-px flex-1 bg-zinc-200" />
+</div>
+
+<div>
+  <h3 className="text-sm font-semibold text-zinc-950">
+    External Image URL
+  </h3>
+
+  <p className="mt-1 text-xs leading-5 text-zinc-500">
+    X, Tumblr, 개인 사이트 등의
+    직접 이미지 주소를 사용합니다.
+    이미지 파일은 Kovemu Storage에
+    저장하지 않습니다.
+  </p>
+
+  <div className="mt-4 grid gap-3">
+    <input
+      type="url"
+      value={
+        externalImageUrl
+      }
+      onChange={(event) =>
+        setExternalImageUrl(
+          event.target.value,
+        )
+      }
+      placeholder="Direct Image URL"
+      className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+    />
+
+    <input
+      type="url"
+      value={
+        externalSourceUrl
+      }
+      onChange={(event) =>
+        setExternalSourceUrl(
+          event.target.value,
+        )
+      }
+      placeholder="Source Post URL (optional)"
+      className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+    />
+
+    <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+      <input
+        value={
+          externalCaption
+        }
+        onChange={(event) =>
+          setExternalCaption(
+            event.target.value,
+          )
+        }
+        placeholder="Caption (optional)"
+        className="h-11 rounded-xl border border-zinc-200 px-4 text-sm"
+      />
+
+      <input
+        type="date"
+        value={
+          externalPublishedAt
+        }
+        onChange={(event) =>
+          setExternalPublishedAt(
+            event.target.value,
+          )
+        }
+        className="h-11 rounded-xl border border-zinc-200 px-3 text-sm"
+      />
+
+      <button
+        type="button"
+        onClick={
+          addExternalImage
+        }
+        className="h-11 rounded-xl bg-zinc-950 px-5 text-sm font-medium text-white"
+      >
+        Add Image
+      </button>
+    </div>
+  </div>
+</div>
+      </section>
+
+      {/* Messages */}
+      {error && (
+        <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
+          {error}
+        </p>
+      )}
+
+      {message && (
+        <p className="mt-5 rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">
+          {message}
+        </p>
       )}
 
       {/* Tabs */}
-      {channel && (
+      {hasAnyWorks && (
         <section className="mt-8">
           <div className="flex items-end justify-between border-b border-zinc-200">
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveTab("shorts")}
-                className={`border-b-2 px-4 pb-3 text-sm font-medium transition ${
-                  activeTab === "shorts"
-                    ? "border-zinc-950 text-zinc-950"
-                    : "border-transparent text-zinc-400 hover:text-zinc-700"
-                }`}
-              >
-                Shorts ({shorts.length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab("videos")}
-                className={`border-b-2 px-4 pb-3 text-sm font-medium transition ${
-                  activeTab === "videos"
-                    ? "border-zinc-950 text-zinc-950"
-                    : "border-transparent text-zinc-400 hover:text-zinc-700"
-                }`}
-              >
-                Videos ({videos.length})
-              </button>
+            <div className="flex overflow-x-auto">
+              {[
+                [
+                  "shorts",
+                  `Shorts (${shorts.length})`,
+                ],
+                [
+                  "videos",
+                  `Videos (${videos.length})`,
+                ],
+                [
+                  "additional",
+                  `Additional (${additionalWorks.length})`,
+                ],
+                [
+                
+  "images",
+  `Images (${
+    imageDrafts.length +
+    externalImageDrafts.length
+  })`,
+],
+              ].map(
+                ([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      setActiveTab(
+                        value as TabType,
+                      )
+                    }
+                    className={`shrink-0 border-b-2 px-4 pb-3 text-sm font-medium ${
+                      activeTab ===
+                      value
+                        ? "border-zinc-950 text-zinc-950"
+                        : "border-transparent text-zinc-400"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
             </div>
 
-            {selectedVideoIds.size > 0 && (
+            {selectedCount >
+              0 && (
               <div className="flex items-center gap-4 pb-3">
-                <span className="text-sm font-medium text-zinc-700">
-                  {selectedVideoIds.size} selected
+                <span className="text-sm">
+                  {selectedCount}{" "}
+                  selected
                 </span>
 
                 <button
                   type="button"
-                  onClick={clearSelection}
-                  className="text-sm text-zinc-400 transition hover:text-zinc-800"
+                  onClick={
+                    clearSelection
+                  }
+                  className="text-sm text-zinc-400"
                 >
                   Clear
                 </button>
@@ -417,309 +1663,680 @@ async function importWorks() {
         </section>
       )}
 
-      {/* Video Grid */}
-      {channel && (
-        <section className="mt-6">
-          <div className="mb-5">
-            <h2 className="text-xl font-semibold text-zinc-950">
-              {activeTab === "shorts" ? "Shorts" : "Videos"}
+      {/* Images */}
+      {activeTab ===
+  "images" &&
+  (
+    imageDrafts.length > 0 ||
+    externalImageDrafts.length > 0
+  ) && (
+          <section className="mt-6">
+            <h2 className="text-xl font-semibold">
+              Images
             </h2>
 
-            <p className="mt-1 text-sm text-zinc-500">
-              {activeTab === "shorts"
-                ? "2분 30초 이하 영상을 표시합니다."
-                : "2분 30초 초과 영상을 표시합니다."}
-            </p>
-          </div>
+            <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {imageDrafts.map(
+                
+                (draft) => {
+                  const selected =
+                    selectedImageIds.has(
+                      draft.id,
+                    );
 
-          {displayedVideos.length > 0 ? (
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {displayedVideos.map((video) => {
-                const selected = selectedVideoIds.has(video.id);
-
-                return (
-                  <article
-                    key={video.id}
-                    onClick={() => toggleVideo(video.id)}
-                    className={`cursor-pointer overflow-hidden rounded-2xl border bg-white transition ${
-                      selected
-                        ? "border-zinc-950 ring-2 ring-zinc-950"
-                        : "border-zinc-200 hover:border-zinc-400"
-                    }`}
-                  >
-                    <div className="relative aspect-video overflow-hidden bg-zinc-100">
-                      {video.thumbnail && (
-                        <img
-                          src={video.thumbnail}
-                          alt={video.title}
-                          className="h-full w-full object-cover"
-                        />
-                      )}
-
+                  return (
+                    <article
+                      key={
+                        draft.id
+                      }
+                      className={`overflow-hidden rounded-2xl border bg-white ${
+                        selected
+                          ? "border-zinc-950 ring-2 ring-zinc-950"
+                          : "border-zinc-200"
+                      }`}
+                    >
                       <div
-                        className={`absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold ${
-                          selected
-                            ? "border-zinc-950 bg-zinc-950 text-white"
-                            : "border-white/80 bg-white/90 text-transparent"
-                        }`}
+                        className="relative cursor-pointer bg-zinc-100"
+                        onClick={() =>
+                          toggleImage(
+                            draft.id,
+                          )
+                        }
                       >
-                        ✓
+                        <img
+                          src={
+                            draft.previewUrl
+                          }
+                          alt=""
+                          className="max-h-[420px] w-full object-contain"
+                        />
+
+                        <div className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold">
+                          {selected
+                            ? "✓"
+                            : ""}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(
+                            event,
+                          ) => {
+                            event.stopPropagation();
+
+                            removeImageDraft(
+                              draft,
+                            );
+                          }}
+                          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white hover:bg-red-600"
+                        >
+                          ×
+                        </button>
                       </div>
-                    </div>
 
-                    <div className="p-4">
-                      <h3 className="line-clamp-2 text-sm font-medium leading-6 text-zinc-900">
-                        {video.title}
-                      </h3>
+                      <div className="space-y-3 p-4">
+                        <input
+                          value={
+                            draft.caption
+                          }
+                          onChange={(
+                            event,
+                          ) =>
+                            updateImageDraft(
+                              draft.id,
+                              {
+                                caption:
+                                  event
+                                    .target
+                                    .value,
+                              },
+                            )
+                          }
+                          placeholder="Caption"
+                          className="h-10 w-full rounded-lg border border-zinc-200 px-3 text-sm"
+                        />
 
-                      <div className="mt-3 flex items-center justify-between">
+                        <input
+                          value={
+                            draft.sourceUrl
+                          }
+                          onChange={(
+                            event,
+                          ) =>
+                            updateImageDraft(
+                              draft.id,
+                              {
+                                sourceUrl:
+                                  event
+                                    .target
+                                    .value,
+                              },
+                            )
+                          }
+                          placeholder="Source URL (Instagram, X, website...)"
+                          className="h-10 w-full rounded-lg border border-zinc-200 px-3 text-sm"
+                        />
+
+                        <input
+                          type="date"
+                          value={
+                            draft.publishedAt
+                          }
+                          onChange={(
+                            event,
+                          ) =>
+                            updateImageDraft(
+                              draft.id,
+                              {
+                                publishedAt:
+                                  event
+                                    .target
+                                    .value,
+                              },
+                            )
+                          }
+                          className="h-10 w-full rounded-lg border border-zinc-200 px-3 text-sm"
+                        />
+
                         <p className="text-xs text-zinc-400">
-                          {new Date(
-                            video.publishedAt
-                          ).toLocaleDateString("ko-KR")}
+                          {Math.round(
+                            draft.file
+                              .size /
+                              1024,
+                          )}{" "}
+                          KB · WebP
                         </p>
-
-                        {video.durationSeconds !== undefined && (
-                          <p className="text-xs text-zinc-400">
-                            {formatDuration(
-                              video.durationSeconds
-                            )}
-                          </p>
-                        )}
                       </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-zinc-200 py-20 text-center">
-              <p className="text-sm text-zinc-400">
-                표시할 영상이 없습니다.
-              </p>
-            </div>
-          )}
-        </section>
-      )}
+                    </article>
+                  );
+                },
+              )
+            }{externalImageDrafts.map(
+  (draft) => (
+    <article
+      key={draft.id}
+      className="overflow-hidden rounded-2xl border border-fuchsia-200 bg-white ring-1 ring-fuchsia-100"
+    >
+      <div className="relative bg-zinc-100">
+        <img
+          src={
+            draft.imageUrl
+          }
+          alt={
+            draft.caption ||
+            "External image"
+          }
+          className="max-h-[420px] w-full object-contain"
+        />
 
-      {/* Artist Connection */}
-      {channel && selectedVideoIds.size > 0 && (
+        <span className="absolute left-3 top-3 rounded-full bg-fuchsia-600 px-2.5 py-1 text-[11px] font-semibold text-white">
+          External
+        </span>
+
+        <button
+          type="button"
+          onClick={() =>
+            removeExternalImageDraft(
+              draft.id,
+            )
+          }
+          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white hover:bg-red-600"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="space-y-3 p-4">
+        <input
+          value={
+            draft.caption
+          }
+          onChange={(
+            event,
+          ) =>
+            updateExternalImageDraft(
+              draft.id,
+              {
+                caption:
+                  event.target
+                    .value,
+              },
+            )
+          }
+          placeholder="Caption"
+          className="h-10 w-full rounded-lg border border-zinc-200 px-3 text-sm"
+        />
+
+        <input
+          value={
+            draft.sourceUrl
+          }
+          onChange={(
+            event,
+          ) =>
+            updateExternalImageDraft(
+              draft.id,
+              {
+                sourceUrl:
+                  event.target
+                    .value,
+              },
+            )
+          }
+          placeholder="Source URL"
+          className="h-10 w-full rounded-lg border border-zinc-200 px-3 text-sm"
+        />
+
+        <input
+          type="date"
+          value={
+            draft.publishedAt
+          }
+          onChange={(
+            event,
+          ) =>
+            updateExternalImageDraft(
+              draft.id,
+              {
+                publishedAt:
+                  event.target
+                    .value,
+              },
+            )
+          }
+          className="h-10 w-full rounded-lg border border-zinc-200 px-3 text-sm"
+        />
+
+        <p className="text-xs text-zinc-400">
+          External URL ·
+          Not stored on Kovemu
+        </p>
+      </div>
+    </article>
+  ),
+)}
+            </div>
+          </section>
+        )}
+
+      {/* Videos */}
+      {activeTab !==
+        "images" &&
+        hasVideoWorks && (
+          <section className="mt-6">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {displayedVideos.map(
+                (video) => {
+                  const selected =
+                    selectedVideoIds.has(
+                      video.id,
+                    );
+
+                  return (
+                    <article
+                      key={
+                        video.id
+                      }
+                      onClick={() =>
+                        toggleVideo(
+                          video.id,
+                        )
+                      }
+                      className={`cursor-pointer overflow-hidden rounded-2xl border bg-white ${
+                        selected
+                          ? "border-zinc-950 ring-2 ring-zinc-950"
+                          : "border-zinc-200"
+                      }`}
+                    >
+                      <div className="relative aspect-video">
+  <img
+    src={video.thumbnail}
+    alt={video.title}
+    className="h-full w-full object-cover"
+  />
+
+  <div className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold">
+    {selected ? "✓" : ""}
+  </div>
+
+  {(video.duration ||
+    typeof video.durationSeconds === "number") && (
+    <div className="absolute bottom-2 right-2 rounded-md bg-black/80 px-2 py-1 text-xs font-semibold text-white">
+     {typeof video.durationSeconds === "number" && (
+  <div className="absolute bottom-2 right-2 rounded-md bg-black/80 px-2 py-1 text-xs font-semibold text-white">
+    {formatDuration(
+      video.durationSeconds,
+    )}
+  </div>
+)}
+    </div>
+  )}
+</div>
+
+                      <div className="p-4">
+                        <h3 className="line-clamp-2 text-sm font-medium">
+                          {
+                            video.title
+                          }
+                        </h3>
+                      </div>
+                    </article>
+                  );
+                },
+              )}
+            </div>
+          </section>
+        )}
+
+      {/* Artist / Import */}
+      {selectedCount >
+        0 && (
         <section className="mt-10 rounded-2xl border border-zinc-200 bg-white p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-zinc-950">
-                Import to Artist
+              <h2 className="text-lg font-semibold">
+                Import to
+                Artist
               </h2>
 
               <p className="mt-1 text-sm text-zinc-500">
-                {selectedWorks.length}개의 선택된 Work를 연결할
-                Artist를 선택합니다.
+                {selectedCount}{" "}
+                Works selected
               </p>
             </div>
 
             <button
               type="button"
               onClick={() =>
-                setShowCreateArtist((current) => !current)
+                setShowCreateArtist(
+                  (
+                    current,
+                  ) =>
+                    !current,
+                )
               }
-              className="rounded-xl border border-zinc-200 px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+              className="rounded-xl border border-zinc-200 px-4 py-2 text-sm"
             >
-              {showCreateArtist
-                ? "Cancel"
-                : "+ Create new Artist"}
+              + Create Artist
             </button>
           </div>
 
-          <div className="mt-6">
-            <label
-              htmlFor="artist"
-              className="mb-2 block text-sm font-medium text-zinc-800"
-            >
-              Artist
-            </label>
+          <select
+            value={
+              selectedArtistId
+            }
+            onChange={(event) =>
+              setSelectedArtistId(
+                event.target.value,
+              )
+            }
+            className="mt-6 h-12 w-full rounded-xl border border-zinc-200 px-4"
+          >
+            <option value="">
+              Select artist
+            </option>
 
-            <select
-              id="artist"
-              value={selectedArtistId}
-              onChange={(event) =>
-                setSelectedArtistId(event.target.value)
-              }
-              className="h-12 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm outline-none transition focus:border-zinc-400"
-            >
-              <option value="">Select artist</option>
-
-              {artists.map((artist) => (
+            {artists.map(
+              (artist) => (
                 <option
-                  key={artist.id}
-                  value={artist.id}
+                  key={
+                    artist.id
+                  }
+                  value={
+                    artist.id
+                  }
                 >
                   {artist.name}
                   {artist.username
                     ? ` (@${artist.username})`
                     : ""}
                 </option>
-              ))}
-            </select>
-          </div>
+              ),
+            )}
+          </select>
 
-          {/* Create Artist */}
           {showCreateArtist && (
-            <div className="mt-6 rounded-2xl bg-zinc-50 p-5">
-              <div className="mb-5">
-                <h3 className="font-semibold text-zinc-950">
-                  Create new Artist
-                </h3>
-
-                <p className="mt-1 text-sm text-zinc-500">
-                  Kovemu에 새 Artist 프로필을 생성합니다.
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="artist-name"
-                    className="mb-2 block text-sm font-medium text-zinc-800"
-                  >
-                    Artist name
-                  </label>
-
-                  <input
-                    id="artist-name"
-                    type="text"
-                    value={newArtist.name}
-                    onChange={(event) =>
-                      setNewArtist((current) => ({
+            <div className="mt-5 rounded-xl bg-zinc-50 p-5">
+              <div className="grid gap-4 md:grid-cols-3">
+                <input
+                  value={
+                    newArtist.name
+                  }
+                  onChange={(event) =>
+                    setNewArtist(
+                      (
+                        current,
+                      ) => ({
                         ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                    placeholder="H//PE Princess"
-                    className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm outline-none focus:border-zinc-400"
-                  />
-                </div>
+                        name:
+                          event
+                            .target
+                            .value,
+                      }),
+                    )
+                  }
+                  placeholder="Artist name"
+                  className="h-11 rounded-xl border px-3"
+                />
 
-                <div>
-                  <label
-                    htmlFor="artist-username"
-                    className="mb-2 block text-sm font-medium text-zinc-800"
-                  >
-                    Username
-                  </label>
-
-                  <input
-                    id="artist-username"
-                    type="text"
-                    value={newArtist.username}
-                    onChange={(event) =>
-                      setNewArtist((current) => ({
+                <input
+                  value={
+                    newArtist.username
+                  }
+                  onChange={(event) =>
+                    setNewArtist(
+                      (
+                        current,
+                      ) => ({
                         ...current,
-                        username: event.target.value,
-                      }))
-                    }
-                    placeholder="hiipe_princess"
-                    className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm outline-none focus:border-zinc-400"
-                  />
-                </div>
+                        username:
+                          event
+                            .target
+                            .value,
+                      }),
+                    )
+                  }
+                  placeholder="Username"
+                  className="h-11 rounded-xl border px-3"
+                />
 
-                <div>
-                  <label
-                    htmlFor="artist-category"
-                    className="mb-2 block text-sm font-medium text-zinc-800"
-                  >
-                    Category
-                  </label>
-
-                  <select
-                    id="artist-category"
-                    value={newArtist.category}
-                    onChange={(event) =>
-                      setNewArtist((current) => ({
+                <select
+                  value={
+                    newArtist.category
+                  }
+                  onChange={(event) =>
+                    setNewArtist(
+                      (
+                        current,
+                      ) => ({
                         ...current,
-                        category: event.target.value,
-                      }))
-                    }
-                    className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm outline-none focus:border-zinc-400"
-                  >
-                    <option value="music">Music</option>
-                    <option value="dance">Dance</option>
-                    <option value="film">Film</option>
-                    <option value="art">Art</option>
-                    <option value="cosplay">Cosplay</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="mt-5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={createArtist}
-                  disabled={creatingArtist}
-                  className="rounded-xl bg-zinc-950 px-5 py-3 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        category:
+                          event
+                            .target
+                            .value,
+                      }),
+                    )
+                  }
+                  className="h-11 rounded-xl border px-3"
                 >
-                  {creatingArtist
-                    ? "Creating..."
-                    : "Create Artist"}
-                </button>
+                  <option value="music">
+                    Music
+                  </option>
+                  <option value="dance">
+                    Dance
+                  </option>
+                  <option value="art">
+                    Art
+                  </option>
+                  <option value="cosplay">
+                    Cosplay
+                  </option>
+                </select>
               </div>
+
+              <button
+                type="button"
+                onClick={
+                  createArtist
+                }
+                disabled={
+                  creatingArtist
+                }
+                className="mt-4 rounded-xl bg-zinc-950 px-5 py-2.5 text-sm text-white"
+              >
+                Create Artist
+              </button>
             </div>
           )}
 
-          {/* Future Import Button */}
-          <div className="mt-6 flex items-center justify-between border-t border-zinc-200 pt-6">
-            <div>
-              <p className="text-sm font-medium text-zinc-900">
-                {selectedWorks.length} works selected
-              </p>
-
-              <p className="mt-1 text-xs text-zinc-400">
-                다음 단계에서 Supabase works 테이블에 저장합니다.
-              </p>
-            </div>
-
+          <div className="mt-6 flex justify-end border-t border-zinc-200 pt-6">
             <button
-  type="button"
-  onClick={importWorks}
-  disabled={
-    !selectedArtistId ||
-    selectedWorks.length === 0 ||
-    importingWorks
-  }
-  className="rounded-xl bg-zinc-950 px-6 py-3 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
->
-  {importingWorks
-    ? "Importing..."
-    : `Import ${selectedWorks.length} works`}
-</button>
+              type="button"
+              onClick={
+                importSelectedWorks
+              }
+              disabled={
+                !selectedArtistId ||
+                importingWorks
+              }
+              className="rounded-xl bg-zinc-950 px-6 py-3 text-sm font-medium text-white disabled:opacity-40"
+            >
+              {importingWorks
+                ? "Importing..."
+                : `Import ${selectedCount} Works`}
+            </button>
           </div>
-        </section>
-      )}
-
-      {/* Empty State */}
-      {!channel && !loading && (
-        <section className="mt-20 text-center">
-          <p className="text-sm text-zinc-400">
-            YouTube 채널을 입력하면 영상이 여기에 표시됩니다.
-          </p>
         </section>
       )}
     </main>
   );
 }
 
-function formatDuration(seconds: number) {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
+/*
+  Browser-side resize +
+  WebP conversion
+*/
+async function convertImageToWebP(
+  file: File,
+): Promise<File> {
+  const bitmap =
+    await createImageBitmap(
+      file,
+    );
+  const ratio =
+    Math.min(
+      1,
+      MAX_IMAGE_SIZE /
+        Math.max(
+          bitmap.width,
+          bitmap.height,
+        ),
+    );
 
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(
-      2,
-      "0"
-    )}:${String(remainingSeconds).padStart(2, "0")}`;
+  const width =
+    Math.round(
+      bitmap.width *
+        ratio,
+    );
+
+  const height =
+    Math.round(
+      bitmap.height *
+        ratio,
+    );
+
+  const canvas =
+    document.createElement(
+      "canvas",
+    );
+
+  canvas.width =
+    width;
+
+  canvas.height =
+    height;
+
+  const context =
+    canvas.getContext(
+      "2d",
+    );
+
+  if (!context) {
+    bitmap.close();
+
+    throw new Error(
+      "Canvas is unavailable.",
+    );
   }
 
-  return `${minutes}:${String(
-    remainingSeconds
-  ).padStart(2, "0")}`;
+  context.drawImage(
+    bitmap,
+    0,
+    0,
+    width,
+    height,
+  );
+
+  bitmap.close();
+
+  const blob =
+    await new Promise<Blob>(
+      (
+        resolve,
+        reject,
+      ) => {
+        canvas.toBlob(
+          (result) => {
+            if (result) {
+              resolve(
+                result,
+              );
+            } else {
+              reject(
+                new Error(
+                  "Image conversion failed.",
+                ),
+              );
+            }
+          },
+          "image/webp",
+          WEBP_QUALITY,
+        );
+      },
+    );
+
+  const filename =
+    file.name.replace(
+      /\.[^.]+$/,
+      "",
+    );
+
+  return new File(
+    [blob],
+    `${filename}.webp`,
+    {
+      type:
+        "image/webp",
+    },
+  );
+}
+
+function formatDuration(
+  totalSeconds: number,
+): string {
+  const hours = Math.floor(
+    totalSeconds / 3600,
+  );
+
+  const minutes = Math.floor(
+    (totalSeconds % 3600) / 60,
+  );
+
+  const seconds =
+    totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes
+      .toString()
+      .padStart(2, "0")}:${seconds
+      .toString()
+      .padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${seconds
+    .toString()
+    .padStart(2, "0")}`;
+}
+/*
+  YouTube URL에서
+  @handle 추출
+*/
+function extractYouTubeHandle(
+  url: string,
+): string {
+  try {
+    const parsed =
+      new URL(url);
+
+    const parts =
+      parsed.pathname
+        .split("/")
+        .filter(Boolean);
+
+    const handle =
+      parts.find(
+        (part) =>
+          part.startsWith(
+            "@",
+          ),
+      );
+
+    if (!handle) {
+      return "";
+    }
+
+    return handle.slice(1);
+  } catch {
+    return "";
+  }
 }
