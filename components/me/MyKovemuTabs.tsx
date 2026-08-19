@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import MyKovemuPicks from "@/components/me/MyKovemuPicks";
+import MyKovemuVotes from "@/components/me/MyKovemuVotes";
 
 const tabs = ["Picks", "Votes"] as const;
 
@@ -37,11 +38,7 @@ export default function MyKovemuTabs() {
         {activeTab === "Picks" ? (
           <MyKovemuPicks />
         ) : (
-          <div className="rounded-2xl border border-dashed border-gray-200 px-6 py-16 text-center">
-            <p className="text-sm text-gray-500">
-              Votes coming soon.
-            </p>
-          </div>
+          <MyKovemuVotes />
         )}
       </div>
     </div>
