@@ -17,15 +17,41 @@ type PickPanelWork = {
   id: string;
   artistId: string;
   artistName: string;
+  category?: string;
   image?: string;
   videoId?: string;
   type?: "image" | "youtube";
+  caption?: string | null;
+  sourceUrl?: string;
+};
+
+type PickedWorkRow = {
+  id: number | string;
+  source: string;
+  source_id: string | null;
+  source_url: string;
+  thumbnail_url: string | null;
+  title: string | null;
+  description: string | null;
+  artist: {
+    id: string;
+    name: string;
+    category: string;
+  } | {
+    id: string;
+    name: string;
+    category: string;
+  }[] | null;
 };
 
 type PickRow = {
   work_id: number | string;
   artist_id: string;
   created_at: string;
+  work:
+    | PickedWorkRow
+    | PickedWorkRow[]
+    | null;
 };
 
 type PickedArtist = {
@@ -41,9 +67,50 @@ type MyPicksPanelProps = {
   refreshKey: number;
   works: PickPanelWork[];
   onWorkClick: (
-    workId: string,
+    work: PickPanelWork,
   ) => void;
 };
+
+function mapPickedWork(
+  work: PickedWorkRow,
+): PickPanelWork | null {
+  const artist =
+    Array.isArray(work.artist)
+      ? work.artist[0]
+      : work.artist;
+
+  if (!artist) {
+    return null;
+  }
+
+  const isYoutube =
+    work.source === "youtube" &&
+    Boolean(work.source_id);
+
+  return {
+    id: String(work.id),
+    artistId: artist.id,
+    artistName: artist.name,
+    category:
+      artist.category,
+    type: isYoutube
+      ? "youtube"
+      : "image",
+    videoId: isYoutube
+      ? work.source_id ?? undefined
+      : undefined,
+    image:
+      work.thumbnail_url ??
+      (isYoutube
+        ? undefined
+        : work.source_url),
+    caption:
+      work.description ??
+      work.title ??
+      null,
+    sourceUrl: work.source_url,
+  };
+}
 
 function getThumbnail(
   work: PickPanelWork,
@@ -178,7 +245,25 @@ function changeFilter(
         await supabase
           .from("work_picks")
           .select(
-            "work_id, artist_id, created_at",
+            `
+              work_id,
+              artist_id,
+              created_at,
+              work:works (
+                id,
+                source,
+                source_id,
+                source_url,
+                thumbnail_url,
+                title,
+                description,
+                artist:creators (
+                  id,
+                  name,
+                  category
+                )
+              )
+            `,
           )
           .eq(
             "user_id",
@@ -203,7 +288,8 @@ function changeFilter(
       }
 
       setPickRows(
-        (data ?? []) as PickRow[],
+        (data ??
+          []) as unknown as PickRow[],
       );
 
       setLoading(false);
@@ -274,7 +360,7 @@ function changeFilter(
   */
   const workMap =
     useMemo(() => {
-      return new Map(
+      const map = new Map(
         works.map(
           (work) => [
             String(
@@ -284,7 +370,39 @@ function changeFilter(
           ],
         ),
       );
-    }, [works]);
+
+      for (const pick of pickRows) {
+        if (!pick.work) {
+          continue;
+        }
+
+        const workRow =
+          Array.isArray(pick.work)
+            ? pick.work[0]
+            : pick.work;
+
+        if (!workRow) {
+          continue;
+        }
+
+        const pickedWork =
+          mapPickedWork(
+            workRow,
+          );
+
+        if (pickedWork) {
+          map.set(
+            pickedWork.id,
+            pickedWork,
+          );
+        }
+      }
+
+      return map;
+    }, [
+      works,
+      pickRows,
+    ]);
 
   /*
     Artist 단위 grouping
@@ -591,9 +709,7 @@ const right =
                                   type="button"
                                   onClick={() =>
                                     onWorkClick(
-                                      String(
-                                        work.id,
-                                      ),
+                                      work,
                                     )
                                   }
                                   className="absolute top-0 h-[120px] w-[86px] overflow-hidden rounded-xl border-2 border-white bg-gray-100 shadow-md transition-all duration-300 ease-out hover:-translate-y-2"

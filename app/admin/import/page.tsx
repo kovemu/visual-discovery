@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -17,6 +18,10 @@ type YouTubeVideo = {
   url: string;
   duration?: string;
   durationSeconds?: number;
+  viewCount?: number;
+  likeCount?: number;
+  channelId?: string;
+  channelTitle?: string;
 };
 
 type YouTubeChannel = {
@@ -62,8 +67,20 @@ type ExternalImageDraft = {
 type TabType =
   | "shorts"
   | "videos"
+  | "fancams"
   | "additional"
   | "images";
+
+type FancamSort =
+  | "views"
+  | "likes"
+  | "recent";
+
+function buildDefaultFancamKeyword(
+  artistName: string,
+) {
+  return `${artistName} fancam | `;
+}
 
 const MAX_IMAGE_SIZE = 1800;
 const WEBP_QUALITY = 0.82;
@@ -122,6 +139,44 @@ export default function AdminImportPage() {
     useState<YouTubeVideo[]>(
       [],
     );
+
+  /*
+    Fancams
+  */
+  const [
+    fancamWorks,
+    setFancamWorks,
+  ] =
+    useState<YouTubeVideo[]>(
+      [],
+    );
+
+  const [
+    loadingFancams,
+    setLoadingFancams,
+  ] =
+    useState(false);
+
+  const [
+    fancamSort,
+    setFancamSort,
+  ] =
+    useState<FancamSort>(
+      "views",
+    );
+
+  const [
+    fancamKeyword,
+    setFancamKeyword,
+  ] = useState("");
+
+  const [
+    excludeBroadcast,
+    setExcludeBroadcast,
+  ] = useState(true);
+
+  const previousFancamArtistIdRef =
+    useRef("");
 
   /*
     Images
@@ -321,6 +376,44 @@ const [
   }, [supabase]);
 
   /*
+    Fancam keyword
+  */
+  useEffect(() => {
+    if (!selectedArtistId) {
+      return;
+    }
+
+    if (
+      selectedArtistId ===
+      previousFancamArtistIdRef.current
+    ) {
+      return;
+    }
+
+    const artist = artists.find(
+      (item) =>
+        item.id ===
+        selectedArtistId,
+    );
+
+    if (!artist) {
+      return;
+    }
+
+    previousFancamArtistIdRef.current =
+      selectedArtistId;
+
+    setFancamKeyword(
+      buildDefaultFancamKeyword(
+        artist.name,
+      ),
+    );
+  }, [
+    selectedArtistId,
+    artists,
+  ]);
+
+  /*
     Channel
   */
   async function loadVideos() {
@@ -515,6 +608,80 @@ setShorts(
       setLoadingAdditional(
         false,
       );
+    }
+  }
+
+  /*
+    Fancams
+  */
+  async function loadFancams() {
+    if (!selectedArtistId) {
+      setError(
+        "Artist를 선택해주세요.",
+      );
+
+      return;
+    }
+
+    const keyword =
+      fancamKeyword.trim();
+
+    if (!keyword) {
+      setError(
+        "검색어를 입력해주세요.",
+      );
+
+      return;
+    }
+
+    setLoadingFancams(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          `/api/youtube/search?artistId=${encodeURIComponent(
+            selectedArtistId,
+          )}&q=${encodeURIComponent(
+            keyword,
+          )}&excludeBroadcast=${excludeBroadcast}`,
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Fancam 검색에 실패했습니다.",
+        );
+      }
+
+      const loaded =
+        (data.works ??
+          []) as YouTubeVideo[];
+
+      setFancamWorks(loaded);
+      setActiveTab("fancams");
+
+      setMessage(
+        `${loaded.length}개의 Fancam 후보를 불러왔습니다.`,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error
+      ) {
+        setError(
+          error.message,
+        );
+      } else {
+        setError(
+          "Fancam 검색에 실패했습니다.",
+        );
+      }
+    } finally {
+      setLoadingFancams(false);
     }
   }
 
@@ -1001,14 +1168,53 @@ function removeExternalImageDraft(
   /*
     Video data
   */
+  const sortedFancamWorks =
+    useMemo(() => {
+      const copy = [
+        ...fancamWorks,
+      ];
+
+      if (fancamSort === "views") {
+        return copy.sort(
+          (a, b) =>
+            (b.viewCount ?? 0) -
+            (a.viewCount ?? 0),
+        );
+      }
+
+      if (fancamSort === "likes") {
+        return copy.sort(
+          (a, b) =>
+            (b.likeCount ?? 0) -
+            (a.likeCount ?? 0),
+        );
+      }
+
+      return copy.sort(
+        (a, b) =>
+          new Date(
+            b.publishedAt,
+          ).getTime() -
+          new Date(
+            a.publishedAt,
+          ).getTime(),
+      );
+    }, [
+      fancamWorks,
+      fancamSort,
+    ]);
+
   const displayedVideos =
-    activeTab ===
-    "shorts"
+    activeTab === "shorts"
       ? shorts
-      : activeTab ===
-          "videos"
+      : activeTab === "videos"
         ? videos
-        : additionalWorks;
+        : activeTab === "fancams"
+          ? sortedFancamWorks
+          : activeTab ===
+              "additional"
+            ? additionalWorks
+            : [];
 
   const allVideoWorks =
     Array.from(
@@ -1016,6 +1222,7 @@ function removeExternalImageDraft(
         [
           ...shorts,
           ...videos,
+          ...fancamWorks,
           ...additionalWorks,
         ].map(
           (video) => [
@@ -1334,6 +1541,7 @@ if (
 
   const hasVideoWorks =
     Boolean(channel) ||
+    fancamWorks.length > 0 ||
     additionalWorks.length >
       0;
 
@@ -1396,6 +1604,157 @@ if (
               ? "Loading..."
               : "Load"}
           </button>
+        </div>
+      </section>
+
+      {/* Fancam Search */}
+      <section className="mt-5 rounded-2xl border border-zinc-200 bg-white p-6">
+        <h2 className="text-lg font-semibold text-zinc-950">
+          Fancam Search
+        </h2>
+
+        <p className="mt-1 text-sm text-zinc-500">
+          Artist와 검색어를 설정한 뒤
+          YouTube 전체에서 fancam /
+          직캠 영상을 검색합니다.
+        </p>
+
+        <div className="mt-5 space-y-4">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-zinc-700">
+              Artist
+            </label>
+
+            <select
+              value={
+                selectedArtistId
+              }
+              onChange={(event) =>
+                setSelectedArtistId(
+                  event.target.value,
+                )
+              }
+              className="h-12 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+            >
+              <option value="">
+                Select artist
+              </option>
+
+              {artists.map(
+                (artist) => (
+                  <option
+                    key={
+                      artist.id
+                    }
+                    value={
+                      artist.id
+                    }
+                  >
+                    {artist.name}
+                    {artist.username
+                      ? ` (@${artist.username})`
+                      : ""}
+                  </option>
+                ),
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-zinc-700">
+              Keyword
+            </label>
+
+            <input
+              value={
+                fancamKeyword
+              }
+              onChange={(event) =>
+                setFancamKeyword(
+                  event.target.value,
+                )
+              }
+              placeholder="Artist name fancam | "
+              className="h-12 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+            />
+          </div>
+
+          <div>
+            <span className="mb-2 block text-sm font-medium text-zinc-700">
+              Sort
+            </span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setExcludeBroadcast(
+                    (current) =>
+                      !current,
+                  )
+                }
+                className={`rounded-lg px-3 py-1.5 text-sm ${
+                  excludeBroadcast
+                    ? "bg-zinc-950 text-white"
+                    : "border border-zinc-200 text-zinc-600"
+                }`}
+              >
+                {excludeBroadcast
+                  ? "방송국 비노출"
+                  : "방송국 노출"}
+              </button>
+
+              {(
+                [
+                  ["views", "Views"],
+                  ["likes", "Likes"],
+                  ["recent", "Recent"],
+                ] as const
+              ).map(
+                ([
+                  value,
+                  label,
+                ]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      setFancamSort(
+                        value,
+                      )
+                    }
+                    className={`rounded-lg px-3 py-1.5 text-sm ${
+                      fancamSort ===
+                      value
+                        ? "bg-zinc-950 text-white"
+                        : "border border-zinc-200 text-zinc-600"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={
+                loadFancams
+              }
+              disabled={
+                loadingFancams ||
+                !selectedArtistId ||
+                !fancamKeyword.trim()
+              }
+              className="h-12 rounded-xl bg-zinc-950 px-6 text-sm font-medium text-white disabled:opacity-40"
+            >
+              {loadingFancams
+                ? "Searching..."
+                : "Search Fancams"}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1604,6 +1963,10 @@ if (
                 [
                   "videos",
                   `Videos (${videos.length})`,
+                ],
+                [
+                  "fancams",
+                  `Fancams (${fancamWorks.length})`,
                 ],
                 [
                   "additional",
@@ -1979,6 +2342,27 @@ if (
                             video.title
                           }
                         </h3>
+
+                        {(video.viewCount !=
+                          null ||
+                          video.channelTitle) && (
+                            <p className="mt-1 text-xs text-zinc-400">
+                            {formatCount(
+                              video.viewCount,
+                            )}{" "}
+                            views ·{" "}
+                            {formatCount(
+                              video.likeCount,
+                            )}{" "}
+                            likes
+                            {video.publishedAt
+                              ? ` · ${video.publishedAt.slice(0, 10)}`
+                              : ""}
+                            {video.channelTitle
+                              ? ` · ${video.channelTitle}`
+                              : ""}
+                          </p>
+                        )}
                       </div>
                     </article>
                   );
@@ -2279,6 +2663,27 @@ async function convertImageToWebP(
         "image/webp",
     },
   );
+}
+
+function formatCount(
+  value: number | undefined,
+): string {
+  if (
+    value == null ||
+    Number.isNaN(value)
+  ) {
+    return "0";
+  }
+
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  }
+
+  return String(value);
 }
 
 function formatDuration(

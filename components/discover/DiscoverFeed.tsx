@@ -2,6 +2,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 import LoginForm from "@/components/LoginForm";
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
 
@@ -22,6 +23,158 @@ export type FeedItem = {
 
 
 const categories = ["DISCOVER", "Music", "Dance", "Art", "Cosplay"] as const;
+
+const DISCOVER_CATEGORY_STORAGE_KEY =
+  "kovemu-discover-category";
+
+type DiscoverCategory =
+  (typeof categories)[number];
+
+type CandidateCategory =
+  Exclude<
+    DiscoverCategory,
+    "DISCOVER"
+  >;
+
+const candidateCategories: CandidateCategory[] =
+  [
+    "Music",
+    "Dance",
+    "Art",
+    "Cosplay",
+  ];
+
+const CANDIDATE_REFILL_THRESHOLD = 24;
+
+type CandidateBatchResponse = {
+  works?: FeedItem[];
+  nextRound?: number;
+  artistPageCount?: number;
+  artistPage?: number;
+  workPage?: number;
+};
+
+type WorkPageCycleState = {
+  workPage: number;
+  artistPageCount: number;
+  hasWorks: boolean;
+};
+
+function updateWorkPageCycleExhaustion(
+  category: CandidateCategory,
+  artistPage: number,
+  artistPageCount: number,
+  workPage: number,
+  incomingCount: number,
+  workPageCycleRef: MutableRefObject<
+    Partial<
+      Record<
+        CandidateCategory,
+        WorkPageCycleState
+      >
+    >
+  >,
+  exhaustedCategoriesRef: MutableRefObject<
+    Set<CandidateCategory>
+  >,
+) {
+  let state =
+    workPageCycleRef.current[
+      category
+    ];
+
+  if (
+    state &&
+    state.workPage !== workPage
+  ) {
+    if (!state.hasWorks) {
+      exhaustedCategoriesRef.current.add(
+        category,
+      );
+    }
+
+    state = undefined;
+  }
+
+  if (!state) {
+    state = {
+      workPage,
+      artistPageCount,
+      hasWorks: incomingCount > 0,
+    };
+  } else {
+    state.artistPageCount =
+      artistPageCount;
+
+    if (incomingCount > 0) {
+      state.hasWorks = true;
+    }
+  }
+
+  workPageCycleRef.current[category] =
+    state;
+
+  if (
+    artistPage ===
+    artistPageCount - 1
+  ) {
+    if (!state.hasWorks) {
+      exhaustedCategoriesRef.current.add(
+        category,
+      );
+    }
+
+    delete workPageCycleRef.current[
+      category
+    ];
+  }
+}
+
+function isValidDiscoverCategory(
+  value: string | null,
+): value is DiscoverCategory {
+  if (!value) {
+    return false;
+  }
+
+  return (
+    categories as readonly string[]
+  ).includes(value);
+}
+
+function readStoredDiscoverCategory(): DiscoverCategory {
+  try {
+    const stored =
+      sessionStorage.getItem(
+        DISCOVER_CATEGORY_STORAGE_KEY,
+      );
+
+    if (
+      isValidDiscoverCategory(
+        stored,
+      )
+    ) {
+      return stored;
+    }
+  } catch {
+    // ignore
+  }
+
+  return "DISCOVER";
+}
+
+function saveDiscoverCategory(
+  category: string,
+) {
+  try {
+    sessionStorage.setItem(
+      DISCOVER_CATEGORY_STORAGE_KEY,
+      category,
+    );
+  } catch {
+    // ignore
+  }
+}
 
 const DISCOVER_SET_SIZE = 12;
 
@@ -728,6 +881,23 @@ function buildDiscoverSet(
   return buildCategorySet(works, category, recentArtists);
 }
 
+function mergeUniqueWorks(
+  current: FeedItem[],
+  incoming: FeedItem[],
+) {
+  return Array.from(
+    new Map(
+      [
+        ...current,
+        ...incoming,
+      ].map((work) => [
+        work.id,
+        work,
+      ]),
+    ).values(),
+  );
+}
+
 export default function DiscoverFeed({ works }: DiscoverFeedProps) {
     const supabase = useMemo(
     () => createClient(),
@@ -755,6 +925,12 @@ const [
   const [currentUserId, setCurrentUserId] =
     useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("DISCOVER");
+  const [
+    candidateWorks,
+    setCandidateWorks,
+  ] = useState<FeedItem[]>(
+    works,
+  );
   const [displayWorks, setDisplayWorks] = useState<FeedItem[]>([]);
   const [selectedWork, setSelectedWork] = useState<FeedItem | null>(null);
   const [pickedWorkIds, setPickedWorkIds] = useState<Set<string>>(new Set());
@@ -762,6 +938,51 @@ const [
     useState<TransitionStage>("idle");
 
   const recentArtistsRef = useRef<string[]>([]);
+  const shownWorkIdsRef =
+    useRef<Set<string>>(
+      new Set(),
+    );
+  const candidateWorksRef =
+    useRef<FeedItem[]>(works);
+  const pickedWorkIdsRef =
+    useRef<Set<string>>(
+      new Set(),
+    );
+  const candidateRoundsRef =
+    useRef<
+      Record<CandidateCategory, number>
+    >({
+      Music: 1,
+      Dance: 1,
+      Art: 1,
+      Cosplay: 1,
+    });
+  const exhaustedCategoriesRef =
+    useRef<
+      Set<CandidateCategory>
+    >(
+      new Set(),
+    );
+  const workPageCycleRef =
+    useRef<
+      Partial<
+        Record<
+          CandidateCategory,
+          WorkPageCycleState
+        >
+      >
+    >({});
+  const refillPromisesRef =
+    useRef<
+      Partial<
+        Record<
+          CandidateCategory,
+          Promise<void>
+        >
+      >
+    >({});
+  const applyingSetRef =
+    useRef(false);
   const feedTopRef = useRef<HTMLDivElement | null>(null);
   const masonryRef = useRef<HTMLDivElement | null>(null);
 
@@ -808,18 +1029,254 @@ const [
       ],
     );
 
- function applyNewSet(category: string, scrollToTop = false) {
-  const availableWorks = works.filter(
-    (work) => !pickedWorkIds.has(work.id),
-  );
+  function getAvailableCandidates() {
+    return candidateWorksRef.current.filter(
+      (work) =>
+        !pickedWorkIdsRef.current.has(
+          work.id,
+        ) &&
+        !shownWorkIdsRef.current.has(
+          work.id,
+        ),
+    );
+  }
 
-  const nextSet = buildDiscoverSet(
-  availableWorks,
-  category,
-  recentArtistsRef.current,
-  );
+  function markWorksShown(
+    nextSet: FeedItem[],
+  ) {
+    for (const work of nextSet) {
+      shownWorkIdsRef.current.add(
+        work.id,
+      );
+    }
+  }
+
+  async function refillCategory(
+    category: CandidateCategory,
+  ) {
+    const existing =
+      refillPromisesRef.current[
+        category
+      ];
+
+    if (existing) {
+      return existing;
+    }
+
+    const refillPromise =
+      (async () => {
+        const round =
+          candidateRoundsRef.current[
+            category
+          ];
+
+        const response = await fetch(
+          `/api/discover/candidates?category=${encodeURIComponent(
+            category,
+          )}&round=${round}`,
+        );
+
+        if (!response.ok) {
+          console.error(
+            "REFILL DISCOVER CANDIDATES ERROR:",
+            await response.text(),
+          );
+
+          return;
+        }
+
+        const data =
+          (await response.json()) as CandidateBatchResponse;
+
+        const incoming =
+          Array.isArray(data.works)
+            ? data.works
+            : [];
+
+        const artistPageCount =
+          typeof data.artistPageCount ===
+          "number"
+            ? data.artistPageCount
+            : 1;
+        const artistPage =
+          typeof data.artistPage ===
+          "number"
+            ? data.artistPage
+            : 0;
+        const workPage =
+          typeof data.workPage ===
+          "number"
+            ? data.workPage
+            : 0;
+
+        updateWorkPageCycleExhaustion(
+          category,
+          artistPage,
+          artistPageCount,
+          workPage,
+          incoming.length,
+          workPageCycleRef,
+          exhaustedCategoriesRef,
+        );
+
+        candidateRoundsRef.current[
+          category
+        ] =
+          typeof data.nextRound ===
+          "number"
+            ? data.nextRound
+            : round + 1;
+
+        const merged =
+          mergeUniqueWorks(
+            candidateWorksRef.current,
+            incoming,
+          );
+
+        candidateWorksRef.current =
+          merged;
+
+        setCandidateWorks(merged);
+      })().finally(() => {
+        delete refillPromisesRef.current[
+          category
+        ];
+      });
+
+    refillPromisesRef.current[
+      category
+    ] = refillPromise;
+
+    return refillPromise;
+  }
+
+  async function ensureCandidatePool(
+    category: string,
+  ) {
+    const targetCategories =
+      category === "DISCOVER"
+        ? candidateCategories
+        : isValidDiscoverCategory(
+              category,
+            ) &&
+            category !== "DISCOVER"
+          ? [
+              category as CandidateCategory,
+            ]
+          : [];
+
+    const available =
+      getAvailableCandidates();
+
+    await Promise.all(
+      targetCategories.map(
+        async (targetCategory) => {
+          const availableCount =
+            available.filter(
+              (work) =>
+                normalizeCategory(
+                  work.category,
+                ) ===
+                normalizeCategory(
+                  targetCategory,
+                ),
+            ).length;
+
+          if (
+            availableCount <
+              CANDIDATE_REFILL_THRESHOLD &&
+            !exhaustedCategoriesRef.current.has(
+              targetCategory,
+            )
+          ) {
+            await refillCategory(
+              targetCategory,
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  function recycleShownCandidates(
+    category: string,
+  ) {
+    const currentIds = new Set(
+      displayWorks.map(
+        (work) => work.id,
+      ),
+    );
+
+    for (
+      const work of
+        candidateWorksRef.current
+    ) {
+      const categoryMatches =
+        category === "DISCOVER" ||
+        normalizeCategory(
+          work.category,
+        ) ===
+          normalizeCategory(
+            category,
+          );
+
+      if (
+        categoryMatches &&
+        !currentIds.has(work.id)
+      ) {
+        shownWorkIdsRef.current.delete(
+          work.id,
+        );
+      }
+    }
+  }
+
+  function createNextSet(
+    category: string,
+  ) {
+    let nextSet =
+      buildDiscoverSet(
+        getAvailableCandidates(),
+        category,
+        recentArtistsRef.current,
+      );
+
+    if (
+      nextSet.length <
+      DISCOVER_SET_SIZE
+    ) {
+      recycleShownCandidates(
+        category,
+      );
+
+      nextSet = buildDiscoverSet(
+        getAvailableCandidates(),
+        category,
+        recentArtistsRef.current,
+      );
+    }
+
+    return nextSet;
+  }
+
+ async function applyNewSet(category: string, scrollToTop = false) {
+  if (applyingSetRef.current) {
+    return;
+  }
+
+  applyingSetRef.current = true;
+
+  try {
+    await ensureCandidatePool(
+      category,
+    );
+
+    const nextSet = createNextSet(
+      category,
+    );
 
     setDisplayWorks(nextSet);
+    markWorksShown(nextSet);
    
 
     const nextArtistIds = Array.from(
@@ -839,11 +1296,28 @@ const [
         });
       });
     }
+  } finally {
+    applyingSetRef.current = false;
+  }
   }
 
  useEffect(() => {
   async function initializeDiscover() {
     recentArtistsRef.current = [];
+    shownWorkIdsRef.current =
+      new Set();
+    candidateWorksRef.current =
+      works;
+    setCandidateWorks(works);
+    candidateRoundsRef.current = {
+      Music: 1,
+      Dance: 1,
+      Art: 1,
+      Cosplay: 1,
+    };
+    exhaustedCategoriesRef.current =
+      new Set();
+    refillPromisesRef.current = {};
 
     const {
       data: { user },
@@ -878,12 +1352,16 @@ const [
         setPickedWorkIds(
           loadedPickedIds,
         );
+        pickedWorkIdsRef.current =
+          loadedPickedIds;
       }
     } else {
       setCurrentUserId(null);
       setPickedWorkIds(
         new Set(),
       );
+      pickedWorkIdsRef.current =
+        new Set();
     }
 
     // 이미 Pick한 작품은 첫 화면에서도 제외
@@ -895,18 +1373,24 @@ const [
           ),
       );
 
+    const initialCategory =
+      readStoredDiscoverCategory();
+
     const initialSet =
       buildDiscoverSet(
         availableWorks,
-        "DISCOVER",
+        initialCategory,
         [],
       );
 
     setSelectedCategory(
-      "DISCOVER",
+      initialCategory,
     );
 
     setDisplayWorks(
+      initialSet,
+    );
+    markWorksShown(
       initialSet,
     );
 
@@ -925,6 +1409,11 @@ const [
 
   initializeDiscover();
 }, [works, supabase]);
+
+  useEffect(() => {
+    pickedWorkIdsRef.current =
+      pickedWorkIds;
+  }, [pickedWorkIds]);
 
   useEffect(() => {
     const container =
@@ -980,16 +1469,26 @@ const [
   }, [selectedWork]);
 
   function handleCategoryClick(category: string) {
-    if (transitionStage !== "idle") {
+    if (
+      transitionStage !== "idle" ||
+      applyingSetRef.current
+    ) {
       return;
     }
 
     setSelectedCategory(category);
-    applyNewSet(category, false);
+    saveDiscoverCategory(category);
+    void applyNewSet(
+      category,
+      false,
+    );
   }
 
   function handleNext() {
-  if (transitionStage !== "idle") {
+  if (
+    transitionStage !== "idle" ||
+    applyingSetRef.current
+  ) {
     return;
   }
 
@@ -1014,44 +1513,60 @@ const [
 
   // 3. 모든 카드가 사라진 뒤 다음 Set 생성
   window.setTimeout(() => {
-    const availableWorks = works.filter(
-      (work) => !pickedWorkIds.has(work.id),
-    );
+    void (async () => {
+      applyingSetRef.current =
+        true;
 
-    const nextSet = buildDiscoverSet(
-      availableWorks,
-      selectedCategory,
-      recentArtistsRef.current,
-    );
+      try {
+        await ensureCandidatePool(
+          selectedCategory,
+        );
 
-    const nextArtistIds = Array.from(
-      new Set(
-        nextSet.map(
-          (work) => work.artistId,
-        ),
-      ),
-    );
+        const nextSet =
+          createNextSet(
+            selectedCategory,
+          );
 
-    recentArtistsRef.current = [
-      ...recentArtistsRef.current,
-      ...nextArtistIds,
-    ].slice(
-      -RECENT_ARTIST_HISTORY_LIMIT,
-    );
+        const nextArtistIds =
+          Array.from(
+            new Set(
+              nextSet.map(
+                (work) =>
+                  work.artistId,
+              ),
+            ),
+          );
 
-    setDisplayWorks(nextSet);
-    setTransitionStage("entering");
+        recentArtistsRef.current = [
+          ...recentArtistsRef.current,
+          ...nextArtistIds,
+        ].slice(
+          -RECENT_ARTIST_HISTORY_LIMIT,
+        );
 
-    requestAnimationFrame(() => {
-      feedTopRef.current?.scrollIntoView({
-        behavior: "auto",
-        block: "start",
-      });
-    });
+        setDisplayWorks(nextSet);
+        markWorksShown(nextSet);
+        setTransitionStage(
+          "entering",
+        );
 
-    window.setTimeout(() => {
-      setTransitionStage("idle");
-    },240);
+        requestAnimationFrame(() => {
+          feedTopRef.current?.scrollIntoView({
+            behavior: "auto",
+            block: "start",
+          });
+        });
+
+        window.setTimeout(() => {
+          setTransitionStage(
+            "idle",
+          );
+        },240);
+      } finally {
+        applyingSetRef.current =
+          false;
+      }
+    })();
   }, 30);
 }
 
@@ -1506,18 +2021,40 @@ function closeWorkModal() {
   addedCount={pickPanelAddedCount}
   pulseKey={pickPanelPulseKey}
   refreshKey={pickPanelRefreshKey}
-  works={works}
-  onWorkClick={(workId) => {
+  works={candidateWorks}
+  onWorkClick={(pickedWork) => {
     const work =
-      works.find(
+      candidateWorks.find(
         (item) =>
           String(item.id) ===
-          String(workId),
+          String(
+            pickedWork.id,
+          ),
       );
 
     if (work) {
       setSelectedWork(work);
+      return;
     }
+
+    setSelectedWork({
+      id: pickedWork.id,
+      artistId:
+        pickedWork.artistId,
+      artistName:
+        pickedWork.artistName,
+      category:
+        pickedWork.category ??
+        "",
+      type: pickedWork.type,
+      image: pickedWork.image,
+      videoId:
+        pickedWork.videoId,
+      caption:
+        pickedWork.caption,
+      sourceUrl:
+        pickedWork.sourceUrl,
+    });
   }}
 />
       {selectedWork && (
