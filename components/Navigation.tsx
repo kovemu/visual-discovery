@@ -13,9 +13,10 @@ const categories = [
 ];
 
 const rankings = [
-  { label: "Trending", href: "/rankings/trending" },
-  { label: "Popular", href: "/rankings/popular" },
-  { label: "Rising", href: "/rankings/rising" },
+  {
+    label: "Weekly Rankings",
+    href: "/rankings",
+  },
 ];
 
 export default function Navigation() {
