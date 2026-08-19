@@ -791,82 +791,96 @@ function buildCategorySet(
   return fallback.slice(0, targetCount);
 }
 
-function buildForYouSet(works: FeedItem[], recentArtists: string[]) {
-  if (works.length === 0) return [];
+function fillDiscoverQuota(
+  works: FeedItem[],
+  recentArtistIds: Set<string>,
+  artistLimit: number,
+  targetCount: number,
+) {
+  const result: FeedItem[] = [];
 
-  const recentArtistIds = new Set(recentArtists);
-  const uniqueArtistCount = Math.max(1, countUniqueArtists(works));
-  const maxArtistLimit = Math.max(
-    1,
-    Math.ceil(DISCOVER_SET_SIZE / uniqueArtistCount) + 2,
-  );
-  const targetCount = Math.min(DISCOVER_SET_SIZE, works.length);
+  for (const [category, quota] of Object.entries(DISCOVER_QUOTA)) {
+    const categoryPool = works.filter(
+      (work) =>
+        normalizeCategory(work.category) === normalizeCategory(category),
+    );
 
-  for (let artistLimit = 1; artistLimit <= maxArtistLimit; artistLimit += 1) {
-    const result: FeedItem[] = [];
-
-    for (const [category, quota] of Object.entries(DISCOVER_QUOTA)) {
-      const categoryPool = works.filter(
-        (work) =>
-          normalizeCategory(work.category) === normalizeCategory(category),
-      );
-
-      const categoryTarget = Math.min(targetCount, result.length + quota);
-
-      addWorksFromPool({
-        pool: categoryPool,
-        result,
-        targetCount: categoryTarget,
-        artistLimit,
-        recentArtistIds,
-        avoidRecentArtists: true,
-      });
-
-      addWorksFromPool({
-        pool: categoryPool,
-        result,
-        targetCount: categoryTarget,
-        artistLimit,
-        recentArtistIds,
-        avoidRecentArtists: false,
-      });
-    }
+    const categoryTarget = Math.min(
+      targetCount,
+      result.length + quota,
+    );
 
     addWorksFromPool({
-      pool: works,
+      pool: categoryPool,
       result,
-      targetCount,
+      targetCount: categoryTarget,
       artistLimit,
       recentArtistIds,
       avoidRecentArtists: true,
     });
 
     addWorksFromPool({
-      pool: works,
+      pool: categoryPool,
       result,
-      targetCount,
+      targetCount: categoryTarget,
       artistLimit,
       recentArtistIds,
       avoidRecentArtists: false,
     });
+  }
+
+  return result;
+}
+
+function buildForYouSet(works: FeedItem[], recentArtists: string[]) {
+  if (works.length === 0) return [];
+
+  const recentArtistIds = new Set(recentArtists);
+  const uniqueArtistCount = Math.max(1, countUniqueArtists(works));
+  const maxArtistLimit = Math.max(
+    DISCOVER_SET_SIZE,
+    Math.ceil(DISCOVER_SET_SIZE / uniqueArtistCount) + 2,
+  );
+  const targetCount = Math.min(DISCOVER_SET_SIZE, works.length);
+
+  let bestResult: FeedItem[] = [];
+
+  for (let artistLimit = 1; artistLimit <= maxArtistLimit; artistLimit += 1) {
+    const result = fillDiscoverQuota(
+      works,
+      recentArtistIds,
+      artistLimit,
+      targetCount,
+    );
+
+    if (result.length > bestResult.length) {
+      bestResult = result;
+    }
 
     if (result.length >= targetCount) {
       return shuffleWorks(result).slice(0, targetCount);
     }
   }
 
-  const fallback: FeedItem[] = [];
+  addWorksFromPool({
+    pool: works,
+    result: bestResult,
+    targetCount,
+    artistLimit: DISCOVER_SET_SIZE,
+    recentArtistIds,
+    avoidRecentArtists: true,
+  });
 
   addWorksFromPool({
     pool: works,
-    result: fallback,
+    result: bestResult,
     targetCount,
     artistLimit: DISCOVER_SET_SIZE,
     recentArtistIds,
     avoidRecentArtists: false,
   });
 
-  return shuffleWorks(fallback).slice(0, targetCount);
+  return shuffleWorks(bestResult).slice(0, targetCount);
 }
 
 function buildDiscoverSet(
