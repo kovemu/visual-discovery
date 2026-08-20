@@ -28,23 +28,12 @@ function AuthShell({
   );
 }
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    created?: string;
-  }>;
-}) {
-  const params = await searchParams;
-
+export default function JoinPage() {
   return (
     <AuthShell>
       <LoginForm
-        mode="login"
+        mode="signup"
         presentation="page"
-        accountCreated={
-          params.created === "1"
-        }
       />
     </AuthShell>
   );

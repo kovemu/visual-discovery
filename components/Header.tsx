@@ -2,16 +2,19 @@
 
 import Link from "next/link";
 import { Search } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
   useState,
 } from "react";
 
+import AuthModal from "@/components/AuthModal";
 import { createClient } from "@/lib/supabase/client";
 import LogoutButton from "@/components/LogoutButton";
 
 export default function Header() {
+  const router = useRouter();
   const supabase = useMemo(
     () => createClient(),
     [],
@@ -28,6 +31,11 @@ export default function Header() {
     authLoading,
     setAuthLoading,
   ] = useState(true);
+
+  const [
+    showAuthModal,
+    setShowAuthModal,
+  ] = useState(false);
 
   useEffect(() => {
     async function loadUser() {
@@ -114,15 +122,30 @@ export default function Header() {
                 <LogoutButton />
               </div>
             ) : (
-              <Link
-                href="/login"
+              <button
+                type="button"
+                onClick={() =>
+                  setShowAuthModal(
+                    true,
+                  )
+                }
                 className="shrink-0 text-sm font-semibold text-gray-700 transition hover:text-fuchsia-600"
               >
                 Log in
-              </Link>
+              </button>
             ))}
         </div>
       </div>
+
+      <AuthModal
+        open={showAuthModal}
+        onClose={() =>
+          setShowAuthModal(false)
+        }
+        onSuccess={() => {
+          router.refresh();
+        }}
+      />
     </header>
   );
 }

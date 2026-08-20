@@ -486,52 +486,72 @@ function changeFilter(
       }`} //픽창(pickpanel) 크기 조정
     >
       <div
-        className={`relative h-full border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(0,0,0,0.04)] transition-all duration-300 ${
-          showAdded
-            ? "shadow-[-8px_0_30px_rgba(217,70,239,0.18)]"
-            : ""
+        className={`relative h-full border-l bg-white transition-all duration-300 ${
+          open
+            ? showAdded
+              ? "border-gray-200 shadow-[-8px_0_30px_rgba(217,70,239,0.18)]"
+              : "border-gray-200 shadow-[-8px_0_24px_rgba(0,0,0,0.04)]"
+            : "border-gray-200 shadow-[-8px_0_24px_rgba(0,0,0,0.04)]"
         }`}
       >
         {/* Toggle */}
         <button
           type="button"
-          className="absolute left-0 top-1/2 flex h-[126px] w-[100px] -translate-y-1/2 flex-col items-center justify-center gap-3 border-y border-l border-gray-200 bg-white text-gray-600 transition hover:text-fuchsia-600"
-        > 
+          aria-label={
+            open
+              ? "Collapse My Picks panel"
+              : "Expand My Picks panel"
+          }
+          className={`absolute top-1/2 transition-colors ${
+            open
+              ? "left-0 flex h-[46px] w-[30px] -translate-y-1/2 items-center justify-center rounded-l-lg border border-r-0 border-gray-200 bg-white text-gray-500 shadow-[-2px_0_8px_rgba(0,0,0,0.06)] hover:text-fuchsia-600"
+              : "left-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center text-gray-400 transition hover:text-fuchsia-600"
+          }`}
+        >
           {open ? (
             <ChevronRight
-              size={17}
+              size={16}
             />
           ) : (
-            <ChevronLeft
-              size={17}
-            />
-          )}
+            <>
+            <div className="flex items-center -space-x-3">
+              <ChevronLeft
+                size={32}
+                strokeWidth={1.15}
+              />
+              <ChevronLeft
+                size={32}
+                strokeWidth={1.15}
+              />
+              <ChevronLeft
+                size={32}
+                strokeWidth={1.15}
+              />
+            </div>
+          
+            <div className="mt-2 text-center leading-[1.45]">
+              <div className="text-[12px] font-medium tracking-[0.22em]">
+                My
+              </div>
+              <div className="text-[12px] font-medium tracking-[0.22em]">
+                picks
+              </div>
+            </div>
 
-          {!open && (
-            <span
-              className="text-xs font-bold tracking-wide"
-              style={{
-                writingMode:
-                  "vertical-rl",
-                transform:
-                  "rotate(180deg)",
-              }}
-            >
-              My Picks
-            </span>
+            
+          </>
           )}
         </button>
+{/* Collapsed Pick feedback */}
+{!open && showAdded && (
+  <>
+    <div className="pointer-events-none absolute left-1/2 top-1/2 h-[150px] w-[88px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-fuchsia-300/30 blur-3xl" />
 
-        {/* 접힌 상태 +n */}
-        {!open &&
-          showAdded && (
-            <div className="pointer-events-none absolute left-1/2 top-[calc(50%-92px)] -translate-x-1/2">
-              <span className="animate-[pickPulse_1.4s_ease-out_forwards] whitespace-nowrap text-sm font-black text-fuchsia-600">
-                +{addedCount}
-              </span>
-            </div>
-          )}
-
+    <span className="pointer-events-none absolute left-1/2 top-[calc(50%+67px)] -translate-x-1/2 animate-[pickPulse_1.4s_ease-out_forwards] whitespace-nowrap text-sm font-bold text-fuchsia-400">
+      +{addedCount}
+    </span>
+  </>
+)}
         {/* 펼친 Panel */}
 <div
   className={`h-full overflow-x-hidden overflow-y-auto pb-10 pl-[78px] pr-5 pt-7 transition-opacity duration-100 ${
@@ -540,17 +560,18 @@ function changeFilter(
       : "pointer-events-none opacity-0"
   }`}
 >
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-black text-gray-950">
-                My Picks
-              </h2>
+<div className="flex items-center justify-between">
+  <h2 className="text-lg font-black text-gray-950">
+    My Picks
+  </h2>
 
-              {showAdded && (
-                <span className="animate-[pickPop_0.45s_ease-out] rounded-full bg-fuchsia-50 px-2.5 py-1 text-xs font-bold text-fuchsia-600">
-                  +{addedCount}
-                </span>
-              )}
-            </div>
+  <Link
+    href="/me"
+    className="text-xs font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+  >
+    View all →
+  </Link>
+</div>
 
             {/* Filter */}
             <div className="mt-4 flex items-center gap-3 text-xs font-semibold">

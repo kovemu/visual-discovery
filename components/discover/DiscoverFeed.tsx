@@ -1756,7 +1756,7 @@ function closeWorkModal() {
     "picked-out"
   ) {
     return picked
-      ? "pointer-events-none opacity-100 scale-[2.06] -translate-y-2"
+      ? "pointer-events-none opacity-100 scale-[1.06] -translate-y-2"
       : "pointer-events-none opacity-100 scale-[0.96] translate-y-2";
   }
 
