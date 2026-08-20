@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 type LoginFormProps = {
   onSuccess?: () => void;
   mode?: "login" | "signup";
-  presentation?: "page" | "modal" | "legacy";
+  presentation?: "page" | "modal";
   accountCreated?: boolean;
   onModeChange?: (
     mode: "login" | "signup",
@@ -132,8 +132,7 @@ export default function LoginForm({
   const [loading, setLoading] = useState(false);
 
   const resolvedPresentation =
-    presentation ??
-    (onSuccess ? "legacy" : "page");
+    presentation ?? "page";
   const isSignup = mode === "signup";
   const showHeading =
     resolvedPresentation === "page" ||

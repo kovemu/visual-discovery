@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import LoginForm from "@/components/LoginForm";
+import AuthModal from "@/components/AuthModal";
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
 
 export type FeedItem = {
@@ -1728,6 +1728,47 @@ function closeWorkModal() {
   );
 }
 
+function openPickedWork(
+  pickedWork: Parameters<
+    NonNullable<
+      React.ComponentProps<
+        typeof MyPicksPanel
+      >["onWorkClick"]
+    >
+  >[0],
+) {
+  const workId = String(pickedWork.id);
+
+  setPickedWorkIds((current) => {
+    const next = new Set(current);
+    next.add(workId);
+    return next;
+  });
+
+  const work = candidateWorks.find(
+    (item) =>
+      String(item.id) === workId,
+  );
+
+  if (work) {
+    setSelectedWork(work);
+    return;
+  }
+
+  setSelectedWork({
+    id: workId,
+    artistId: pickedWork.artistId,
+    artistName: pickedWork.artistName,
+    category:
+      pickedWork.category ?? "",
+    type: pickedWork.type,
+    image: pickedWork.image,
+    videoId: pickedWork.videoId,
+    caption: pickedWork.caption,
+    sourceUrl: pickedWork.sourceUrl,
+  });
+}
+
   const currentSetPickedCount =
   displayWorks.filter((work) =>
     pickedWorkIds.has(work.id),
@@ -2036,40 +2077,7 @@ function closeWorkModal() {
   pulseKey={pickPanelPulseKey}
   refreshKey={pickPanelRefreshKey}
   works={candidateWorks}
-  onWorkClick={(pickedWork) => {
-    const work =
-      candidateWorks.find(
-        (item) =>
-          String(item.id) ===
-          String(
-            pickedWork.id,
-          ),
-      );
-
-    if (work) {
-      setSelectedWork(work);
-      return;
-    }
-
-    setSelectedWork({
-      id: pickedWork.id,
-      artistId:
-        pickedWork.artistId,
-      artistName:
-        pickedWork.artistName,
-      category:
-        pickedWork.category ??
-        "",
-      type: pickedWork.type,
-      image: pickedWork.image,
-      videoId:
-        pickedWork.videoId,
-      caption:
-        pickedWork.caption,
-      sourceUrl:
-        pickedWork.sourceUrl,
-    });
-  }}
+  onWorkClick={openPickedWork}
 />
       {selectedWork && (
         <div
@@ -2098,40 +2106,6 @@ function closeWorkModal() {
                 />
               )}
             </div>
-{showLogin && (
-  <div
-    className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-    onClick={() =>
-      setShowLogin(false)
-    }
-  >
-    <div
-      className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl"
-      onClick={(event) =>
-        event.stopPropagation()
-      }
-    >
-      <LoginForm
-  onSuccess={async () => {
-    setShowLogin(false);
-
-    if (!pendingPickWork) {
-      return;
-    }
-
-    const workToPick =
-      pendingPickWork;
-
-    setPendingPickWork(null);
-
-    await togglePick(
-      workToPick,
-    );
-  }}
-/>
-    </div>
-  </div>
-)}
             <aside className="relative w-[300px] shrink-0 bg-white p-6">
               <button
                 type="button"
@@ -2183,6 +2157,27 @@ function closeWorkModal() {
           </div>
         </div>
       )}
+
+      <AuthModal
+        open={showLogin}
+        onClose={() =>
+          setShowLogin(false)
+        }
+        onSuccess={async () => {
+          if (!pendingPickWork) {
+            return;
+          }
+
+          const workToPick =
+            pendingPickWork;
+
+          setPendingPickWork(null);
+
+          await togglePick(
+            workToPick,
+          );
+        }}
+      />
     </>
   );
 }

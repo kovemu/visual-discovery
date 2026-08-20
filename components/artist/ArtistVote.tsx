@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import LoginForm from "@/components/LoginForm";
+import AuthModal from "@/components/AuthModal";
 
 type ArtistVoteProps = {
   artistId: string;
@@ -255,50 +255,24 @@ export default function ArtistVote({
         )}
       </div>
 
-      {showLogin && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => {
-            setShowLogin(false);
-            setPendingVote(false);
-          }}
-        >
-          <div
-            className="relative w-full max-w-md rounded-2xl bg-white p-8 shadow-xl"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setShowLogin(false);
-                setPendingVote(false);
-              }}
-              aria-label="Close login"
-              className="absolute right-5 top-5 text-xl text-gray-400 transition hover:text-gray-900"
-            >
-              ×
-            </button>
+      <AuthModal
+        open={showLogin}
+        onClose={() => {
+          setShowLogin(false);
+          setPendingVote(false);
+        }}
+        onSuccess={async () => {
+          const isLoggedIn =
+            await loadVote();
 
-            <LoginForm
-              onSuccess={async () => {
-                setShowLogin(false);
-
-                const isLoggedIn =
-                  await loadVote();
-
-                if (
-                  isLoggedIn &&
-                  pendingVote
-                ) {
-                  await saveVote();
-                }
-              }}
-            />
-          </div>
-        </div>
-      )}
+          if (
+            isLoggedIn &&
+            pendingVote
+          ) {
+            await saveVote();
+          }
+        }}
+      />
     </>
   );
 }

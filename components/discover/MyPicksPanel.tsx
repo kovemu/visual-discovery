@@ -202,6 +202,11 @@ export default function MyPicksPanel({
   ] = useState(true);
 
   const [
+    authVersion,
+    setAuthVersion,
+  ] = useState(0);
+
+  const [
     hoveredArtistId,
     setHoveredArtistId,
   ] =
@@ -222,6 +227,48 @@ function changeFilter(
     nextFilter,
   );
 }
+
+  useEffect(() => {
+    const {
+      data: {
+        subscription,
+      },
+    } =
+      supabase.auth.onAuthStateChange(
+        (event, session) => {
+          if (
+            event ===
+              "SIGNED_OUT" ||
+            !session?.user
+          ) {
+            setPickRows([]);
+            setLoading(false);
+          }
+
+          if (
+            event === "SIGNED_IN"
+          ) {
+            setPickRows([]);
+            setLoading(true);
+          }
+
+          if (
+            event !==
+            "INITIAL_SESSION"
+          ) {
+            setAuthVersion(
+              (current) =>
+                current + 1,
+            );
+          }
+        },
+      );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
+
   /*
     DB에서 Pick 목록 불러오기
   */
@@ -300,6 +347,7 @@ function changeFilter(
     supabase,
     pulseKey,
     refreshKey,
+    authVersion,
   ]);
 
   /*

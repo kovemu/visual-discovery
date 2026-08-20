@@ -74,12 +74,59 @@ type TabType =
 type FancamSort =
   | "views"
   | "likes"
-  | "recent";
+  | "recent"
+  | "oldest";
+
+const fancamSortOptions: {
+  value: FancamSort;
+  label: string;
+}[] = [
+  {
+    value: "recent",
+    label: "Recent",
+  },
+  {
+    value: "oldest",
+    label: "Oldest",
+  },
+  {
+    value: "views",
+    label: "Views",
+  },
+  {
+    value: "likes",
+    label: "Likes",
+  },
+];
 
 function buildDefaultFancamKeyword(
   artistName: string,
 ) {
   return `${artistName} fancam | `;
+}
+
+function mergeYouTubeVideos(
+  existing: YouTubeVideo[],
+  incoming: YouTubeVideo[],
+) {
+  const seen = new Set(
+    existing.map(
+      (video) => video.id,
+    ),
+  );
+
+  const merged = [...existing];
+
+  for (const video of incoming) {
+    if (seen.has(video.id)) {
+      continue;
+    }
+
+    seen.add(video.id);
+    merged.push(video);
+  }
+
+  return merged;
 }
 
 const MAX_IMAGE_SIZE = 1800;
@@ -156,6 +203,30 @@ export default function AdminImportPage() {
     setLoadingFancams,
   ] =
     useState(false);
+
+  const [
+    channelNextPageToken,
+    setChannelNextPageToken,
+  ] = useState<string | null>(
+    null,
+  );
+
+  const [
+    loadingOlderShorts,
+    setLoadingOlderShorts,
+  ] = useState(false);
+
+  const [
+    fancamNextPageToken,
+    setFancamNextPageToken,
+  ] = useState<string | null>(
+    null,
+  );
+
+  const [
+    loadingOlderFancams,
+    setLoadingOlderFancams,
+  ] = useState(false);
 
   const [
     fancamSort,
@@ -434,6 +505,7 @@ const [
     setChannel(null);
     setShorts([]);
     setVideos([]);
+    setChannelNextPageToken(null);
 
     try {
       const response =
@@ -482,6 +554,10 @@ setShorts(
         data.videos ?? [],
       );
 
+      setChannelNextPageToken(
+        data.nextPageToken ?? null,
+      );
+
       setActiveTab(
         "shorts",
       );
@@ -503,6 +579,85 @@ setShorts(
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadOlderShorts() {
+    if (
+      !channelUrl.trim() ||
+      !channelNextPageToken
+    ) {
+      return;
+    }
+
+    setLoadingOlderShorts(true);
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          `/api/youtube/channel?url=${encodeURIComponent(
+            channelUrl,
+          )}&pageToken=${encodeURIComponent(
+            channelNextPageToken,
+          )}`,
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "YouTube Shorts를 추가로 불러오지 못했습니다.",
+        );
+      }
+
+      const incomingShorts =
+        (data.shorts ??
+          []) as YouTubeVideo[];
+
+      const incomingVideos =
+        (data.videos ??
+          []) as YouTubeVideo[];
+
+      setShorts((current) =>
+        mergeYouTubeVideos(
+          current,
+          incomingShorts,
+        ),
+      );
+
+      setVideos((current) =>
+        mergeYouTubeVideos(
+          current,
+          incomingVideos,
+        ),
+      );
+
+      setChannelNextPageToken(
+        data.nextPageToken ?? null,
+      );
+
+      setMessage(
+        `${incomingShorts.length + incomingVideos.length}개의 추가 영상을 불러왔습니다.`,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error
+      ) {
+        setError(
+          error.message,
+        );
+      } else {
+        setError(
+          "YouTube Shorts를 추가로 불러오지 못했습니다.",
+        );
+      }
+    } finally {
+      setLoadingOlderShorts(
+        false,
+      );
     }
   }
 
@@ -637,6 +792,7 @@ setShorts(
     setLoadingFancams(true);
     setError("");
     setMessage("");
+    setFancamNextPageToken(null);
 
     try {
       const response =
@@ -663,6 +819,9 @@ setShorts(
           []) as YouTubeVideo[];
 
       setFancamWorks(loaded);
+      setFancamNextPageToken(
+        data.nextPageToken ?? null,
+      );
       setActiveTab("fancams");
 
       setMessage(
@@ -682,6 +841,77 @@ setShorts(
       }
     } finally {
       setLoadingFancams(false);
+    }
+  }
+
+  async function loadOlderFancams() {
+    if (
+      !selectedArtistId ||
+      !fancamKeyword.trim() ||
+      !fancamNextPageToken
+    ) {
+      return;
+    }
+
+    setLoadingOlderFancams(true);
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          `/api/youtube/search?artistId=${encodeURIComponent(
+            selectedArtistId,
+          )}&q=${encodeURIComponent(
+            fancamKeyword.trim(),
+          )}&excludeBroadcast=${excludeBroadcast}&pageToken=${encodeURIComponent(
+            fancamNextPageToken,
+          )}`,
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Fancam을 추가로 불러오지 못했습니다.",
+        );
+      }
+
+      const loaded =
+        (data.works ??
+          []) as YouTubeVideo[];
+
+      setFancamWorks((current) =>
+        mergeYouTubeVideos(
+          current,
+          loaded,
+        ),
+      );
+
+      setFancamNextPageToken(
+        data.nextPageToken ?? null,
+      );
+
+      setMessage(
+        `${loaded.length}개의 추가 Fancam 후보를 불러왔습니다.`,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error
+      ) {
+        setError(
+          error.message,
+        );
+      } else {
+        setError(
+          "Fancam을 추가로 불러오지 못했습니다.",
+        );
+      }
+    } finally {
+      setLoadingOlderFancams(
+        false,
+      );
     }
   }
 
@@ -1190,6 +1420,18 @@ function removeExternalImageDraft(
         );
       }
 
+      if (fancamSort === "oldest") {
+        return copy.sort(
+          (a, b) =>
+            new Date(
+              a.publishedAt,
+            ).getTime() -
+            new Date(
+              b.publishedAt,
+            ).getTime(),
+        );
+      }
+
       return copy.sort(
         (a, b) =>
           new Date(
@@ -1681,7 +1923,7 @@ if (
 
           <div>
             <span className="mb-2 block text-sm font-medium text-zinc-700">
-              Sort
+              Options
             </span>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1703,37 +1945,6 @@ if (
                   ? "방송국 비노출"
                   : "방송국 노출"}
               </button>
-
-              {(
-                [
-                  ["views", "Views"],
-                  ["likes", "Likes"],
-                  ["recent", "Recent"],
-                ] as const
-              ).map(
-                ([
-                  value,
-                  label,
-                ]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() =>
-                      setFancamSort(
-                        value,
-                      )
-                    }
-                    className={`rounded-lg px-3 py-1.5 text-sm ${
-                      fancamSort ===
-                      value
-                        ? "bg-zinc-950 text-white"
-                        : "border border-zinc-200 text-zinc-600"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ),
-              )}
             </div>
           </div>
 
@@ -2287,6 +2498,56 @@ if (
         "images" &&
         hasVideoWorks && (
           <section className="mt-6">
+            {activeTab ===
+              "fancams" &&
+              fancamWorks.length >
+                0 && (
+                <div className="mb-4 flex flex-col gap-3 border-b border-zinc-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm font-semibold text-zinc-950">
+                    Fancams (
+                    {
+                      fancamWorks.length
+                    }
+                    )
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-zinc-500">
+                      Sort
+                    </span>
+
+                    {fancamSortOptions.map(
+                      ({
+                        value,
+                        label,
+                      }) => (
+                        <button
+                          key={
+                            value
+                          }
+                          type="button"
+                          onClick={() =>
+                            setFancamSort(
+                              value,
+                            )
+                          }
+                          className={`rounded-lg px-3 py-1.5 text-sm ${
+                            fancamSort ===
+                            value
+                              ? "bg-zinc-950 text-white"
+                              : "border border-zinc-200 text-zinc-600"
+                          }`}
+                        >
+                          {
+                            label
+                          }
+                        </button>
+                      ),
+                    )}
+                  </div>
+                </div>
+              )}
+
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
               {displayedVideos.map(
                 (video) => {
@@ -2343,6 +2604,14 @@ if (
                           }
                         </h3>
 
+                        {video.publishedAt && (
+                          <p className="mt-1 text-xs text-zinc-400">
+                            {formatPublishedDate(
+                              video.publishedAt,
+                            )}
+                          </p>
+                        )}
+
                         {(video.viewCount !=
                           null ||
                           video.channelTitle) && (
@@ -2355,9 +2624,6 @@ if (
                               video.likeCount,
                             )}{" "}
                             likes
-                            {video.publishedAt
-                              ? ` · ${video.publishedAt.slice(0, 10)}`
-                              : ""}
                             {video.channelTitle
                               ? ` · ${video.channelTitle}`
                               : ""}
@@ -2369,6 +2635,48 @@ if (
                 },
               )}
             </div>
+
+            {activeTab ===
+              "shorts" &&
+              channelNextPageToken && (
+                <div className="mt-6 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={
+                      loadOlderShorts
+                    }
+                    disabled={
+                      loadingOlderShorts
+                    }
+                    className="rounded-xl border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {loadingOlderShorts
+                      ? "Loading older..."
+                      : "Load older"}
+                  </button>
+                </div>
+              )}
+
+            {activeTab ===
+              "fancams" &&
+              fancamNextPageToken && (
+                <div className="mt-6 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={
+                      loadOlderFancams
+                    }
+                    disabled={
+                      loadingOlderFancams
+                    }
+                    className="rounded-xl border border-zinc-200 bg-white px-5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    {loadingOlderFancams
+                      ? "Loading older..."
+                      : "Load older"}
+                  </button>
+                </div>
+              )}
           </section>
         )}
 
@@ -2662,6 +2970,29 @@ async function convertImageToWebP(
       type:
         "image/webp",
     },
+  );
+}
+
+function formatPublishedDate(
+  publishedAt: string,
+) {
+  const date = new Date(
+    publishedAt,
+  );
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return publishedAt.slice(
+      0,
+      10,
+    );
+  }
+
+  return date.toLocaleDateString(
+    "en-CA",
   );
 }
 

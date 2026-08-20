@@ -1,6 +1,7 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { ChevronsLeft } from "lucide-react";
+import { Play, Trash2 } from "lucide-react";
 import Link from "next/link";
 import {
   useCallback,
@@ -307,8 +308,11 @@ function PickWorkCard({
 
           <div className="absolute inset-0 bg-black/10 transition group-hover:bg-black/20" />
 
-          <div className="absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white">
-            ▶
+          <div className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white">
+            <Play
+              size={12}
+              className="fill-white"
+            />
           </div>
         </div>
       ) : work.image ? (

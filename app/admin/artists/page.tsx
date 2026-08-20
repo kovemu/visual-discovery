@@ -10,6 +10,9 @@ type ArtistRow = {
   profile_image: string | null;
   cover_image: string | null;
   created_at: string;
+  works: {
+    count: number;
+  }[];
 };
 
 type AdminArtistsPageProps = {
@@ -73,6 +76,14 @@ function getCategoryBadgeStyle(
   }
 }
 
+function formatWorkCountLabel(
+  count: number,
+) {
+  return count === 1
+    ? "1 work"
+    : `${count} works`;
+}
+
 function getCategoryFilterStyle(
   category: string,
   selected: boolean,
@@ -132,7 +143,8 @@ export default async function AdminArtistsPage({
           bio,
           profile_image,
           cover_image,
-          created_at
+          created_at,
+          works(count)
         `,
       )
       .order("name", {
@@ -285,6 +297,10 @@ export default async function AdminArtistsPage({
                       artist.profile_image,
                   );
 
+                const workCount =
+                  artist.works?.[0]
+                    ?.count ?? 0;
+
                 return (
                   <div
                     key={artist.id}
@@ -337,6 +353,12 @@ export default async function AdminArtistsPage({
                           >
                             {formatCategory(
                               artist.category,
+                            )}
+                          </span>
+
+                          <span className="text-base font-semibold text-zinc-800">
+                            {formatWorkCountLabel(
+                              workCount,
                             )}
                           </span>
                         </div>

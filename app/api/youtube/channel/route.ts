@@ -3,9 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 const SHORTS_LIMIT_SECONDS = 150;
-const MAX_SHORTS = 80;
-const MAX_VIDEOS = 40;
-const MAX_SCAN_COUNT = 200;
 
 function parseChannelUrl(url: string) {
   try {
@@ -62,6 +59,9 @@ export async function GET(request: NextRequest) {
     }
 
     const channelUrl = request.nextUrl.searchParams.get("url");
+    const pageToken =
+      request.nextUrl.searchParams.get("pageToken") ??
+      undefined;
 
     if (!channelUrl) {
       return NextResponse.json(
@@ -123,47 +123,35 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const playlistItems: any[] = [];
-    let pageToken: string | undefined;
+    const playlistParams = new URLSearchParams({
+      part: "snippet,contentDetails",
+      playlistId: uploadsPlaylistId,
+      maxResults: "50",
+      key: YOUTUBE_API_KEY,
+    });
 
-    while (playlistItems.length < MAX_SCAN_COUNT) {
-      const playlistParams = new URLSearchParams({
-        part: "snippet,contentDetails",
-        playlistId: uploadsPlaylistId,
-        maxResults: "50",
-        key: YOUTUBE_API_KEY,
-      });
-
-      if (pageToken) {
-        playlistParams.set("pageToken", pageToken);
-      }
-
-      const playlistResponse = await fetch(
-        `https://www.googleapis.com/youtube/v3/playlistItems?${playlistParams}`
-      );
-
-      if (!playlistResponse.ok) {
-        return NextResponse.json(
-          { error: "Failed to load YouTube videos." },
-          { status: 500 }
-        );
-      }
-
-      const playlistData = await playlistResponse.json();
-
-      playlistItems.push(...(playlistData.items ?? []));
-
-      pageToken = playlistData.nextPageToken;
-
-      if (!pageToken) {
-        break;
-      }
+    if (pageToken) {
+      playlistParams.set("pageToken", pageToken);
     }
 
-    const trimmedItems = playlistItems.slice(0, MAX_SCAN_COUNT);
+    const playlistResponse = await fetch(
+      `https://www.googleapis.com/youtube/v3/playlistItems?${playlistParams}`
+    );
 
-    const videoIds = trimmedItems
-      .map((item) => item.contentDetails?.videoId)
+    if (!playlistResponse.ok) {
+      return NextResponse.json(
+        { error: "Failed to load YouTube videos." },
+        { status: 500 }
+      );
+    }
+
+    const playlistData = await playlistResponse.json();
+    const playlistItems = playlistData.items ?? [];
+    const nextPageToken =
+      playlistData.nextPageToken ?? null;
+
+    const videoIds = playlistItems
+      .map((item: { contentDetails?: { videoId?: string } }) => item.contentDetails?.videoId)
       .filter(Boolean);
 
     const videoDetailMap = new Map<
@@ -206,10 +194,24 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const formattedVideos = trimmedItems
-      .map((item) => {
+    const formattedVideos = playlistItems
+      .map((item: {
+        contentDetails?: {
+          videoId?: string;
+          videoPublishedAt?: string;
+        };
+        snippet: {
+          title: string;
+          description: string;
+          publishedAt?: string;
+          thumbnails?: Record<
+            string,
+            { url?: string }
+          >;
+        };
+      }) => {
         const videoId = item.contentDetails?.videoId;
-        const detail = videoDetailMap.get(videoId);
+        const detail = videoDetailMap.get(videoId ?? "");
 
         if (!videoId || !detail) {
           return null;
@@ -225,7 +227,7 @@ export async function GET(request: NextRequest) {
             item.snippet.thumbnails?.medium?.url ||
             item.snippet.thumbnails?.default?.url,
           publishedAt:
-            item.contentDetails.videoPublishedAt ||
+            item.contentDetails?.videoPublishedAt ||
             item.snippet.publishedAt,
           url: `https://www.youtube.com/watch?v=${videoId}`,
           duration: detail.duration,
@@ -234,19 +236,15 @@ export async function GET(request: NextRequest) {
       })
       .filter(Boolean);
 
-    const shorts = formattedVideos
-      .filter(
-        (video: any) =>
-          video.durationSeconds <= SHORTS_LIMIT_SECONDS
-      )
-      .slice(0, MAX_SHORTS);
+    const shorts = formattedVideos.filter(
+      (video: { durationSeconds: number }) =>
+        video.durationSeconds <= SHORTS_LIMIT_SECONDS
+    );
 
-    const videos = formattedVideos
-      .filter(
-        (video: any) =>
-          video.durationSeconds > SHORTS_LIMIT_SECONDS
-      )
-      .slice(0, MAX_VIDEOS);
+    const videos = formattedVideos.filter(
+      (video: { durationSeconds: number }) =>
+        video.durationSeconds > SHORTS_LIMIT_SECONDS
+    );
 
     return NextResponse.json({
       channel: {
@@ -260,6 +258,7 @@ export async function GET(request: NextRequest) {
 
       shorts,
       videos,
+      nextPageToken,
     });
   } catch (error) {
     console.error(error);

@@ -150,6 +150,7 @@ async function resolveOfficialChannelId(
 
 async function searchFancamVideoIds(
   query: string,
+  pageToken?: string,
 ) {
   const params = new URLSearchParams({
     part: "snippet",
@@ -161,6 +162,10 @@ async function searchFancamVideoIds(
     regionCode: "KR",
     key: YOUTUBE_API_KEY!,
   });
+
+  if (pageToken) {
+    params.set("pageToken", pageToken);
+  }
 
   const response = await fetch(
     `https://www.googleapis.com/youtube/v3/search?${params}`,
@@ -185,7 +190,13 @@ async function searchFancamVideoIds(
     }
   }
 
-  return Array.from(new Set(videoIds));
+  return {
+    videoIds: Array.from(new Set(videoIds)),
+    nextPageToken:
+      (data.nextPageToken as
+        | string
+        | undefined) ?? null,
+  };
 }
 
 async function loadVideoDetails(
@@ -335,6 +346,11 @@ export async function GET(
       excludeBroadcastParam !==
       "false";
 
+    const pageToken =
+      request.nextUrl.searchParams.get(
+        "pageToken",
+      ) ?? undefined;
+
     if (!artistId) {
       return NextResponse.json(
         {
@@ -399,18 +415,26 @@ export async function GET(
         artist.youtube_url,
       );
 
-    const videoIds =
+    const searchQueryForApi =
+      excludeBroadcast
+        ? buildFancamSearchQuery(
+            searchQuery,
+          )
+        : searchQuery;
+
+    const {
+      videoIds,
+      nextPageToken,
+    } =
       await searchFancamVideoIds(
-        excludeBroadcast
-          ? buildFancamSearchQuery(
-              searchQuery,
-            )
-          : searchQuery,
+        searchQueryForApi,
+        pageToken,
       );
 
     if (videoIds.length === 0) {
       return NextResponse.json({
         works: [],
+        nextPageToken,
       });
     }
 
@@ -441,6 +465,7 @@ export async function GET(
 
     return NextResponse.json({
       works,
+      nextPageToken,
     });
   } catch (error) {
     console.error(
