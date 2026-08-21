@@ -254,6 +254,7 @@ export async function getDiscoverCandidateBatch(
           ARTISTS_PER_BATCH -
           1,
       )
+      .eq("works.featured", false)
       .order("published_at", {
         referencedTable: "works",
         ascending: false,
