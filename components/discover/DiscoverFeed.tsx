@@ -62,6 +62,7 @@ type WorkPageCycleState = {
   workPage: number;
   artistPageCount: number;
   hasWorks: boolean;
+  seenArtistPages: Set<number>;
 };
 
 function updateWorkPageCycleExhaustion(
@@ -91,7 +92,11 @@ function updateWorkPageCycleExhaustion(
     state &&
     state.workPage !== workPage
   ) {
-    if (!state.hasWorks) {
+    if (
+      state.seenArtistPages.size >=
+        state.artistPageCount &&
+      !state.hasWorks
+    ) {
       exhaustedCategoriesRef.current.add(
         category,
       );
@@ -105,10 +110,16 @@ function updateWorkPageCycleExhaustion(
       workPage,
       artistPageCount,
       hasWorks: incomingCount > 0,
+      seenArtistPages: new Set([
+        artistPage,
+      ]),
     };
   } else {
     state.artistPageCount =
       artistPageCount;
+    state.seenArtistPages.add(
+      artistPage,
+    );
 
     if (incomingCount > 0) {
       state.hasWorks = true;
@@ -119,8 +130,8 @@ function updateWorkPageCycleExhaustion(
     state;
 
   if (
-    artistPage ===
-    artistPageCount - 1
+    state.seenArtistPages.size >=
+    state.artistPageCount
   ) {
     if (!state.hasWorks) {
       exhaustedCategoriesRef.current.add(
@@ -249,6 +260,9 @@ function saveDiscoverCategory(
 }
 
 const DISCOVER_SET_SIZE = 12;
+
+const CANDIDATE_PREFETCH_THRESHOLD =
+  DISCOVER_SET_SIZE * 3;
 
 const DISCOVER_QUOTA: Record<string, number> = {
   Music: 6,
@@ -1356,52 +1370,125 @@ const [
     return refillPromise;
   }
 
+  function getTargetCategories(
+    category: string,
+  ): CandidateCategory[] {
+    if (category === "DISCOVER") {
+      return candidateCategories;
+    }
+
+    if (
+      isValidDiscoverCategory(
+        category,
+      ) &&
+      category !== "DISCOVER"
+    ) {
+      return [
+        category as CandidateCategory,
+      ];
+    }
+
+    return [];
+  }
+
+  function countCategoryAvailable(
+    targetCategory: CandidateCategory,
+  ) {
+    return getAvailableCandidates().filter(
+      (work) =>
+        normalizeCategory(
+          work.category,
+        ) ===
+        normalizeCategory(
+          targetCategory,
+        ),
+    ).length;
+  }
+
+  function maybePrefetchCandidates(
+    category: string,
+  ) {
+    for (const targetCategory of getTargetCategories(
+      category,
+    )) {
+      if (
+        exhaustedCategoriesRef.current.has(
+          targetCategory,
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        countCategoryAvailable(
+          targetCategory,
+        ) <=
+        CANDIDATE_PREFETCH_THRESHOLD
+      ) {
+        void refillCategory(
+          targetCategory,
+        );
+      }
+    }
+  }
+
   async function ensureCandidatePool(
     category: string,
   ) {
-    const targetCategories =
-      category === "DISCOVER"
-        ? candidateCategories
-        : isValidDiscoverCategory(
-              category,
-            ) &&
-            category !== "DISCOVER"
-          ? [
-              category as CandidateCategory,
-            ]
-          : [];
-
-    const available =
-      getAvailableCandidates();
-
-    await Promise.all(
-      targetCategories.map(
-        async (targetCategory) => {
-          const availableCount =
-            available.filter(
-              (work) =>
-                normalizeCategory(
-                  work.category,
-                ) ===
-                normalizeCategory(
-                  targetCategory,
-                ),
-            ).length;
-
-          if (
-            availableCount <
-              CANDIDATE_REFILL_THRESHOLD &&
-            !exhaustedCategoriesRef.current.has(
-              targetCategory,
-            )
-          ) {
-            await refillCategory(
-              targetCategory,
-            );
-          }
-        },
-      ),
+    maybePrefetchCandidates(
+      category,
     );
+
+    if (
+      createNextSet(category)
+        .length >=
+      DISCOVER_SET_SIZE
+    ) {
+      return;
+    }
+
+    const targetCategories =
+      getTargetCategories(
+        category,
+      );
+
+    for (const targetCategory of targetCategories) {
+      if (
+        exhaustedCategoriesRef.current.has(
+          targetCategory,
+        )
+      ) {
+        continue;
+      }
+
+      const inFlight =
+        refillPromisesRef.current[
+          targetCategory
+        ];
+
+      if (inFlight) {
+        await inFlight;
+      }
+
+      if (
+        createNextSet(category)
+          .length >=
+        DISCOVER_SET_SIZE
+      ) {
+        return;
+      }
+
+      if (
+        countCategoryAvailable(
+          targetCategory,
+        ) <
+        CANDIDATE_REFILL_THRESHOLD
+      ) {
+        await refillCategory(
+          targetCategory,
+        );
+      }
+    }
   }
 
   function recycleShownCandidates(
@@ -1502,6 +1589,10 @@ const [
         });
       });
     }
+
+    maybePrefetchCandidates(
+      category,
+    );
   } finally {
     applyingSetRef.current = false;
   }
@@ -1523,6 +1614,7 @@ const [
     };
     exhaustedCategoriesRef.current =
       new Set();
+    workPageCycleRef.current = {};
     refillPromisesRef.current = {};
 
     const {
@@ -1613,6 +1705,10 @@ const [
       ).slice(
         -RECENT_ARTIST_HISTORY_LIMIT,
       );
+
+    maybePrefetchCandidates(
+      initialCategory,
+    );
   }
 
   initializeDiscover();
@@ -1770,6 +1866,10 @@ const [
             "idle",
           );
         },240);
+
+        maybePrefetchCandidates(
+          selectedCategory,
+        );
       } finally {
         applyingSetRef.current =
           false;
