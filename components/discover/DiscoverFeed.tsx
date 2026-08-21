@@ -27,6 +27,9 @@ const categories = ["DISCOVER", "Music", "Dance", "Art", "Cosplay"] as const;
 const DISCOVER_CATEGORY_STORAGE_KEY =
   "kovemu-discover-category";
 
+const DISCOVER_SEED_STORAGE_PREFIX =
+  "kovemu-discover-seed-";
+
 type DiscoverCategory =
   (typeof categories)[number];
 
@@ -52,6 +55,7 @@ type CandidateBatchResponse = {
   artistPageCount?: number;
   artistPage?: number;
   workPage?: number;
+  reusedInitialBatch?: boolean;
 };
 
 type WorkPageCycleState = {
@@ -161,6 +165,74 @@ function readStoredDiscoverCategory(): DiscoverCategory {
   }
 
   return "DISCOVER";
+}
+
+function readStoredCategorySeed(
+  category: CandidateCategory,
+) {
+  try {
+    return sessionStorage.getItem(
+      `${DISCOVER_SEED_STORAGE_PREFIX}${category}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredCategorySeed(
+  category: CandidateCategory,
+  seed: string,
+) {
+  try {
+    sessionStorage.setItem(
+      `${DISCOVER_SEED_STORAGE_PREFIX}${category}`,
+      seed,
+    );
+  } catch {
+    // ignore
+  }
+}
+
+function createCategorySeed() {
+  return `${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 12)}`;
+}
+
+function getOrCreateCategorySeed(
+  category: CandidateCategory,
+  cache: Partial<
+    Record<
+      CandidateCategory,
+      string
+    >
+  >,
+) {
+  if (cache[category]) {
+    return cache[category]!;
+  }
+
+  const stored =
+    readStoredCategorySeed(
+      category,
+    );
+
+  if (stored) {
+    cache[category] = stored;
+    return stored;
+  }
+
+  const seed =
+    createCategorySeed();
+
+  writeStoredCategorySeed(
+    category,
+    seed,
+  );
+  cache[category] =
+    seed;
+
+  return seed;
 }
 
 function saveDiscoverCategory(
@@ -995,6 +1067,15 @@ const [
         >
       >
     >({});
+  const categorySeedsRef =
+    useRef<
+      Partial<
+        Record<
+          CandidateCategory,
+          string
+        >
+      >
+    >({});
   const applyingSetRef =
     useRef(false);
   const feedTopRef = useRef<HTMLDivElement | null>(null);
@@ -1065,6 +1146,162 @@ const [
     }
   }
 
+  function applyCandidateBatch(
+    category: CandidateCategory,
+    data: CandidateBatchResponse,
+    replaceCategoryWorks: boolean,
+  ) {
+    const incoming =
+      Array.isArray(data.works)
+        ? data.works
+        : [];
+    const reusedInitialBatch =
+      data.reusedInitialBatch ===
+      true;
+
+    if (
+      replaceCategoryWorks &&
+      !reusedInitialBatch
+    ) {
+      candidateWorksRef.current =
+        mergeUniqueWorks(
+          candidateWorksRef.current.filter(
+            (work) =>
+              normalizeCategory(
+                work.category,
+              ) !==
+              normalizeCategory(
+                category,
+              ),
+          ),
+          incoming,
+        );
+    } else if (
+      !reusedInitialBatch
+    ) {
+      candidateWorksRef.current =
+        mergeUniqueWorks(
+          candidateWorksRef.current,
+          incoming,
+        );
+    }
+
+    const artistPageCount =
+      typeof data.artistPageCount ===
+      "number"
+        ? data.artistPageCount
+        : 1;
+    const artistPage =
+      typeof data.artistPage ===
+      "number"
+        ? data.artistPage
+        : 0;
+    const workPage =
+      typeof data.workPage ===
+      "number"
+        ? data.workPage
+        : 0;
+    const incomingCount =
+      reusedInitialBatch
+        ? candidateWorksRef.current.filter(
+            (work) =>
+              normalizeCategory(
+                work.category,
+              ) ===
+              normalizeCategory(
+                category,
+              ),
+          ).length
+        : incoming.length;
+
+    updateWorkPageCycleExhaustion(
+      category,
+      artistPage,
+      artistPageCount,
+      workPage,
+      incomingCount,
+      workPageCycleRef,
+      exhaustedCategoriesRef,
+    );
+
+    candidateRoundsRef.current[
+      category
+    ] =
+      typeof data.nextRound ===
+      "number"
+        ? data.nextRound
+        : candidateRoundsRef.current[
+            category
+          ] + 1;
+  }
+
+  async function fetchCandidateBatch(
+    category: CandidateCategory,
+    round: number,
+    allowReuseRound0 = false,
+  ) {
+    const seed =
+      getOrCreateCategorySeed(
+        category,
+        categorySeedsRef
+          .current,
+      );
+
+    const reuseParam =
+      allowReuseRound0
+        ? "&allowReuseRound0=true"
+        : "";
+
+    const response = await fetch(
+      `/api/discover/candidates?category=${encodeURIComponent(
+        category,
+      )}&round=${round}&seed=${encodeURIComponent(
+        seed,
+      )}${reuseParam}`,
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        await response.text(),
+      );
+    }
+
+    return (await response.json()) as CandidateBatchResponse;
+  }
+
+  async function bootstrapInitialSeededCandidates() {
+    await Promise.all(
+      candidateCategories.map(
+        async (category) => {
+          try {
+            const data =
+              await fetchCandidateBatch(
+                category,
+                1,
+                true,
+              );
+
+            applyCandidateBatch(
+              category,
+              data,
+              true,
+            );
+          } catch (error) {
+            console.error(
+              "BOOTSTRAP DISCOVER CANDIDATES ERROR:",
+              category,
+              error,
+            );
+          }
+        },
+      ),
+    );
+
+    setCandidateWorks(
+      candidateWorksRef.current,
+    );
+  }
+
   async function refillCategory(
     category: CandidateCategory,
   ) {
@@ -1084,73 +1321,28 @@ const [
             category
           ];
 
-        const response = await fetch(
-          `/api/discover/candidates?category=${encodeURIComponent(
-            category,
-          )}&round=${round}`,
-        );
+        try {
+          const data =
+            await fetchCandidateBatch(
+              category,
+              round,
+            );
 
-        if (!response.ok) {
+          applyCandidateBatch(
+            category,
+            data,
+            false,
+          );
+
+          setCandidateWorks(
+            candidateWorksRef.current,
+          );
+        } catch (error) {
           console.error(
             "REFILL DISCOVER CANDIDATES ERROR:",
-            await response.text(),
+            error,
           );
-
-          return;
         }
-
-        const data =
-          (await response.json()) as CandidateBatchResponse;
-
-        const incoming =
-          Array.isArray(data.works)
-            ? data.works
-            : [];
-
-        const artistPageCount =
-          typeof data.artistPageCount ===
-          "number"
-            ? data.artistPageCount
-            : 1;
-        const artistPage =
-          typeof data.artistPage ===
-          "number"
-            ? data.artistPage
-            : 0;
-        const workPage =
-          typeof data.workPage ===
-          "number"
-            ? data.workPage
-            : 0;
-
-        updateWorkPageCycleExhaustion(
-          category,
-          artistPage,
-          artistPageCount,
-          workPage,
-          incoming.length,
-          workPageCycleRef,
-          exhaustedCategoriesRef,
-        );
-
-        candidateRoundsRef.current[
-          category
-        ] =
-          typeof data.nextRound ===
-          "number"
-            ? data.nextRound
-            : round + 1;
-
-        const merged =
-          mergeUniqueWorks(
-            candidateWorksRef.current,
-            incoming,
-          );
-
-        candidateWorksRef.current =
-          merged;
-
-        setCandidateWorks(merged);
       })().finally(() => {
         delete refillPromisesRef.current[
           category
@@ -1379,8 +1571,10 @@ const [
     }
 
     // 이미 Pick한 작품은 첫 화면에서도 제외
+    await bootstrapInitialSeededCandidates();
+
     const availableWorks =
-      works.filter(
+      candidateWorksRef.current.filter(
         (work) =>
           !loadedPickedIds.has(
             work.id,
