@@ -1032,6 +1032,8 @@ const [
     works,
   );
   const [displayWorks, setDisplayWorks] = useState<FeedItem[]>([]);
+  const [isInitializing, setIsInitializing] =
+    useState(true);
   const [selectedWork, setSelectedWork] = useState<FeedItem | null>(null);
   const [pickedWorkIds, setPickedWorkIds] = useState<Set<string>>(new Set());
   const [transitionStage, setTransitionStage] =
@@ -1600,6 +1602,9 @@ const [
 
  useEffect(() => {
   async function initializeDiscover() {
+    setIsInitializing(true);
+
+    try {
     recentArtistsRef.current = [];
     shownWorkIdsRef.current =
       new Set();
@@ -1709,6 +1714,9 @@ const [
     maybePrefetchCandidates(
       initialCategory,
     );
+    } finally {
+      setIsInitializing(false);
+    }
   }
 
   initializeDiscover();
@@ -2105,6 +2113,38 @@ function openPickedWork(
   return "opacity-100 scale-100 translate-y-0";
 }
 
+  const skeletonColumns =
+    useMemo(() => {
+      const columns = Array.from(
+        {
+          length: Math.max(
+            1,
+            columnCount,
+          ),
+        },
+        () =>
+          [] as number[],
+      );
+
+      for (
+        let index = 0;
+        index <
+        DISCOVER_SET_SIZE;
+        index += 1
+      ) {
+        columns[
+          index % columns.length
+        ].push(
+          VIDEO_HEIGHTS[
+            index %
+              VIDEO_HEIGHTS.length
+          ],
+        );
+      }
+
+      return columns;
+    }, [columnCount]);
+
   return (
     <>
       <nav className="border-b border-gray-100 bg-white py-4">
@@ -2136,7 +2176,45 @@ function openPickedWork(
         ref={masonryRef}
         className="mt-4 pb-24"//discover 밑단 여백 조정
       >
-        {displayWorks.length > 0 ? (
+        {isInitializing ? (
+          <div
+            className="grid items-start"
+            style={{
+              gridTemplateColumns: `repeat(${Math.max(1, columnCount)}, minmax(0, 1fr))`,
+              gap: `${MASONRY_GAP}px`,
+            }}
+          >
+            {skeletonColumns.map(
+              (
+                column,
+                columnIndex,
+              ) => (
+                <div
+                  key={`skeleton-column-${columnIndex}`}
+                  className="flex min-w-0 flex-col"
+                  style={{
+                    gap: `${MASONRY_GAP}px`,
+                  }}
+                >
+                  {column.map(
+                    (
+                      height,
+                      cardIndex,
+                    ) => (
+                      <div
+                        key={`skeleton-${columnIndex}-${cardIndex}`}
+                        className="w-full rounded-2xl bg-gray-100 animate-pulse"
+                        style={{
+                          height: `${height}px`,
+                        }}
+                      />
+                    ),
+                  )}
+                </div>
+              ),
+            )}
+          </div>
+        ) : displayWorks.length > 0 ? (
           <div
             className="grid items-start"
             style={{
