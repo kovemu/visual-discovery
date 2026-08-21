@@ -49,6 +49,18 @@ function parseDuration(duration: string) {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
+function parseStatistic(
+  value: string | number | undefined,
+) {
+  const parsed = Number(value ?? 0);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return parsed;
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!YOUTUBE_API_KEY) {
@@ -159,6 +171,8 @@ export async function GET(request: NextRequest) {
       {
         duration: string;
         durationSeconds: number;
+        viewCount: number;
+        likeCount: number;
       }
     >();
 
@@ -166,7 +180,7 @@ export async function GET(request: NextRequest) {
       const idBatch = videoIds.slice(index, index + 50);
 
       const videoParams = new URLSearchParams({
-        part: "contentDetails",
+        part: "contentDetails,statistics",
         id: idBatch.join(","),
         key: YOUTUBE_API_KEY,
       });
@@ -190,6 +204,12 @@ export async function GET(request: NextRequest) {
         videoDetailMap.set(video.id, {
           duration,
           durationSeconds: parseDuration(duration),
+          viewCount: parseStatistic(
+            video.statistics?.viewCount,
+          ),
+          likeCount: parseStatistic(
+            video.statistics?.likeCount,
+          ),
         });
       }
     }
@@ -232,6 +252,8 @@ export async function GET(request: NextRequest) {
           url: `https://www.youtube.com/watch?v=${videoId}`,
           duration: detail.duration,
           durationSeconds: detail.durationSeconds,
+          viewCount: detail.viewCount,
+          likeCount: detail.likeCount,
         };
       })
       .filter(Boolean);

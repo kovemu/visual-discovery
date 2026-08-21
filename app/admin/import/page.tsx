@@ -71,14 +71,14 @@ type TabType =
   | "additional"
   | "images";
 
-type FancamSort =
+type YouTubeVideoSort =
   | "views"
   | "likes"
   | "recent"
   | "oldest";
 
-const fancamSortOptions: {
-  value: FancamSort;
+const youtubeVideoSortOptions: {
+  value: YouTubeVideoSort;
   label: string;
 }[] = [
   {
@@ -98,6 +98,51 @@ const fancamSortOptions: {
     label: "Likes",
   },
 ];
+
+function sortYouTubeVideos(
+  works: YouTubeVideo[],
+  sort: YouTubeVideoSort,
+) {
+  const copy = [...works];
+
+  if (sort === "views") {
+    return copy.sort(
+      (a, b) =>
+        (b.viewCount ?? 0) -
+        (a.viewCount ?? 0),
+    );
+  }
+
+  if (sort === "likes") {
+    return copy.sort(
+      (a, b) =>
+        (b.likeCount ?? 0) -
+        (a.likeCount ?? 0),
+    );
+  }
+
+  if (sort === "oldest") {
+    return copy.sort(
+      (a, b) =>
+        new Date(
+          a.publishedAt,
+        ).getTime() -
+        new Date(
+          b.publishedAt,
+        ).getTime(),
+    );
+  }
+
+  return copy.sort(
+    (a, b) =>
+      new Date(
+        b.publishedAt,
+      ).getTime() -
+      new Date(
+        a.publishedAt,
+      ).getTime(),
+  );
+}
 
 function buildDefaultFancamKeyword(
   artistName: string,
@@ -229,10 +274,10 @@ export default function AdminImportPage() {
   ] = useState(false);
 
   const [
-    fancamSort,
-    setFancamSort,
+    youtubeVideoSort,
+    setYoutubeVideoSort,
   ] =
-    useState<FancamSort>(
+    useState<YouTubeVideoSort>(
       "views",
     );
 
@@ -1398,59 +1443,50 @@ function removeExternalImageDraft(
   /*
     Video data
   */
+  const sortedShorts =
+    useMemo(
+      () =>
+        sortYouTubeVideos(
+          shorts,
+          youtubeVideoSort,
+        ),
+      [
+        shorts,
+        youtubeVideoSort,
+      ],
+    );
+
+  const sortedVideos =
+    useMemo(
+      () =>
+        sortYouTubeVideos(
+          videos,
+          youtubeVideoSort,
+        ),
+      [
+        videos,
+        youtubeVideoSort,
+      ],
+    );
+
   const sortedFancamWorks =
-    useMemo(() => {
-      const copy = [
-        ...fancamWorks,
-      ];
-
-      if (fancamSort === "views") {
-        return copy.sort(
-          (a, b) =>
-            (b.viewCount ?? 0) -
-            (a.viewCount ?? 0),
-        );
-      }
-
-      if (fancamSort === "likes") {
-        return copy.sort(
-          (a, b) =>
-            (b.likeCount ?? 0) -
-            (a.likeCount ?? 0),
-        );
-      }
-
-      if (fancamSort === "oldest") {
-        return copy.sort(
-          (a, b) =>
-            new Date(
-              a.publishedAt,
-            ).getTime() -
-            new Date(
-              b.publishedAt,
-            ).getTime(),
-        );
-      }
-
-      return copy.sort(
-        (a, b) =>
-          new Date(
-            b.publishedAt,
-          ).getTime() -
-          new Date(
-            a.publishedAt,
-          ).getTime(),
-      );
-    }, [
-      fancamWorks,
-      fancamSort,
-    ]);
+    useMemo(
+      () =>
+        sortYouTubeVideos(
+          fancamWorks,
+          youtubeVideoSort,
+        ),
+      [
+        fancamWorks,
+        youtubeVideoSort,
+      ],
+    );
 
   const displayedVideos =
     activeTab === "shorts"
-      ? shorts
+      ? sortedShorts
       : activeTab === "videos"
-        ? videos
+        ? sortedVideos
         : activeTab === "fancams"
           ? sortedFancamWorks
           : activeTab ===
@@ -2498,17 +2534,23 @@ if (
         "images" &&
         hasVideoWorks && (
           <section className="mt-6">
-            {activeTab ===
-              "fancams" &&
-              fancamWorks.length >
+            {(activeTab ===
+              "shorts" ||
+              activeTab ===
+                "videos" ||
+              activeTab ===
+                "fancams") &&
+              displayedVideos.length >
                 0 && (
                 <div className="mb-4 flex flex-col gap-3 border-b border-zinc-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm font-semibold text-zinc-950">
-                    Fancams (
-                    {
-                      fancamWorks.length
-                    }
-                    )
+                    {activeTab ===
+                    "shorts"
+                      ? `Shorts (${shorts.length})`
+                      : activeTab ===
+                          "videos"
+                        ? `Videos (${videos.length})`
+                        : `Fancams (${fancamWorks.length})`}
                   </p>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -2516,7 +2558,7 @@ if (
                       Sort
                     </span>
 
-                    {fancamSortOptions.map(
+                    {youtubeVideoSortOptions.map(
                       ({
                         value,
                         label,
@@ -2527,12 +2569,12 @@ if (
                           }
                           type="button"
                           onClick={() =>
-                            setFancamSort(
+                            setYoutubeVideoSort(
                               value,
                             )
                           }
                           className={`rounded-lg px-3 py-1.5 text-sm ${
-                            fancamSort ===
+                            youtubeVideoSort ===
                             value
                               ? "bg-zinc-950 text-white"
                               : "border border-zinc-200 text-zinc-600"
@@ -2614,6 +2656,8 @@ if (
 
                         {(video.viewCount !=
                           null ||
+                          video.likeCount !=
+                            null ||
                           video.channelTitle) && (
                             <p className="mt-1 text-xs text-zinc-400">
                             {formatCount(
