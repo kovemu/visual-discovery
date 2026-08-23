@@ -1,5 +1,7 @@
 "use client";
 
+import { Check } from "lucide-react";
+import Link from "next/link";
 import {
   useEffect,
   useMemo,
@@ -11,6 +13,13 @@ import { createClient } from "@/lib/supabase/client";
 import YouTubePreviewModal, {
   YouTubePreviewThumbnail,
 } from "@/components/admin/YouTubePreviewModal";
+import type {
+  WorkAnalysis,
+  WorkSourceTab,
+} from "@/lib/ai/analyzeWorks";
+import { ANALYZE_WORKS_BATCH_SIZE } from "@/lib/ai/analyzeWorks";
+import type { ResearchSource } from "@/lib/ai/generateArtistProfile";
+import { extractInstagramUrl } from "@/lib/youtube/extractInstagramUrl";
 
 type YouTubeVideo = {
   id: string;
@@ -32,12 +41,55 @@ type YouTubeChannel = {
   title: string;
   description: string;
   thumbnail: string;
+  customUrl?: string;
+  instagramUrl?: string;
+};
+
+const TAG_OPTIONS = [
+  "K-pop",
+  "Virtual",
+  "Boy Group",
+  "Girl Group",
+  "Rock",
+  "Band",
+  "Solo",
+  "Performance",
+  "Cosplay",
+] as const;
+
+type ArtistTag = (typeof TAG_OPTIONS)[number];
+
+type ArtistProfileDraft = {
+  name: string;
+  username: string;
+  category: string;
+  tags: ArtistTag[];
+  youtubeUrl: string;
+  instagramUrl: string;
+  profileImage: string;
+  tagline: string;
+  bio: string;
+  coverImageUrl: string;
 };
 
 type Artist = {
   id: string;
   name: string;
   username: string | null;
+};
+
+type ExistingCreator = {
+  id: string;
+  name: string;
+  username: string | null;
+  category: string | null;
+  tagline: string | null;
+  bio: string | null;
+  profile_image: string | null;
+  cover_image: string | null;
+  youtube_url: string | null;
+  instagram_url: string | null;
+  tags: string[] | null;
 };
 
 type NewArtistForm = {
@@ -78,7 +130,8 @@ type YouTubeVideoSort =
   | "views"
   | "likes"
   | "recent"
-  | "oldest";
+  | "oldest"
+  | "ai";
 
 const youtubeVideoSortOptions: {
   value: YouTubeVideoSort;
@@ -100,13 +153,45 @@ const youtubeVideoSortOptions: {
     value: "likes",
     label: "Likes",
   },
+  {
+    value: "ai",
+    label: "AI Score",
+  },
 ];
 
 function sortYouTubeVideos(
   works: YouTubeVideo[],
   sort: YouTubeVideoSort,
+  analyses: Record<string, WorkAnalysis> = {},
 ) {
   const copy = [...works];
+
+  if (sort === "ai") {
+    return copy.sort((a, b) => {
+      const scoreA =
+        analyses[a.id]?.discoveryScore;
+      const scoreB =
+        analyses[b.id]?.discoveryScore;
+      const hasA =
+        typeof scoreA === "number";
+      const hasB =
+        typeof scoreB === "number";
+
+      if (hasA && hasB) {
+        return scoreB - scoreA;
+      }
+
+      if (hasA) {
+        return -1;
+      }
+
+      if (hasB) {
+        return 1;
+      }
+
+      return 0;
+    });
+  }
 
   if (sort === "views") {
     return copy.sort(
@@ -179,6 +264,97 @@ function mergeYouTubeVideos(
 
 const MAX_IMAGE_SIZE = 1800;
 const WEBP_QUALITY = 0.82;
+
+function usernameFromCustomUrl(
+  customUrl?: string,
+) {
+  if (!customUrl) {
+    return "";
+  }
+
+  return customUrl.replace(/^@/, "").trim();
+}
+
+function normalizeDraftTags(
+  tags: string[] | null | undefined,
+) {
+  return (tags ?? []).filter(
+    (tag): tag is ArtistTag =>
+      TAG_OPTIONS.some(
+        (option) => option === tag,
+      ),
+  );
+}
+
+function buildArtistProfileDraft(
+  channel: YouTubeChannel,
+  url: string,
+): ArtistProfileDraft {
+  return {
+    name: channel.title ?? "",
+    username:
+      extractYouTubeHandle(url) ||
+      usernameFromCustomUrl(
+        channel.customUrl,
+      ),
+    category: "music",
+    tags: ["K-pop"],
+    youtubeUrl: url.trim(),
+    instagramUrl:
+      channel.instagramUrl ||
+      extractInstagramUrl(
+        channel.description ?? "",
+      ),
+    profileImage: channel.thumbnail ?? "",
+    tagline: "",
+    bio: "",
+    coverImageUrl: "",
+  };
+}
+
+function mergeDraftWithExisting(
+  draft: ArtistProfileDraft,
+  existing: ExistingCreator,
+): ArtistProfileDraft {
+  const existingTags =
+    normalizeDraftTags(existing.tags);
+
+  return {
+    name:
+      existing.name?.trim() ||
+      draft.name,
+    username:
+      existing.username?.trim() ||
+      draft.username,
+    category:
+      existing.category?.trim() ||
+      draft.category,
+    tags:
+      existingTags.length > 0
+        ? existingTags
+        : draft.tags,
+    youtubeUrl:
+      draft.youtubeUrl ||
+      existing.youtube_url ||
+      "",
+    instagramUrl:
+      existing.instagram_url?.trim() ||
+      draft.instagramUrl,
+    profileImage:
+      draft.profileImage ||
+      existing.profile_image ||
+      "",
+    tagline:
+      existing.tagline?.trim() ||
+      draft.tagline,
+    bio:
+      existing.bio?.trim() ||
+      draft.bio,
+    coverImageUrl:
+      existing.cover_image?.trim() ||
+      draft.coverImageUrl,
+  };
+}
 
 export default function AdminImportPage() {
   const supabase =
@@ -285,6 +461,66 @@ export default function AdminImportPage() {
     );
 
   const [
+    workAnalyses,
+    setWorkAnalyses,
+  ] = useState<
+    Record<string, WorkAnalysis>
+  >({});
+
+  const [
+    analyzingWorks,
+    setAnalyzingWorks,
+  ] = useState(false);
+
+  const [
+    aiAssistEnabled,
+    setAiAssistEnabled,
+  ] = useState(false);
+
+  const [
+    artistProfileDraft,
+    setArtistProfileDraft,
+  ] =
+    useState<ArtistProfileDraft | null>(
+      null,
+    );
+
+  const [
+    existingArtist,
+    setExistingArtist,
+  ] =
+    useState<ExistingCreator | null>(
+      null,
+    );
+
+  const [
+    generatingProfile,
+    setGeneratingProfile,
+  ] = useState(false);
+
+  const [
+    profileResearchSources,
+    setProfileResearchSources,
+  ] = useState<ResearchSource[]>([]);
+
+  const [
+    creatingOnboarding,
+    setCreatingOnboarding,
+  ] = useState(false);
+
+  const [
+    onboardingResult,
+    setOnboardingResult,
+  ] = useState<{
+    artistId: string;
+    artistName: string;
+    importedCount: number;
+    featuredCount: number;
+    artistCreated: boolean;
+    importFailed: boolean;
+  } | null>(null);
+
+  const [
     fancamKeyword,
     setFancamKeyword,
   ] = useState("");
@@ -369,6 +605,14 @@ const [
   const [
     selectedVideoIds,
     setSelectedVideoIds,
+  ] =
+    useState<Set<string>>(
+      new Set(),
+    );
+
+  const [
+    featuredVideoIds,
+    setFeaturedVideoIds,
   ] =
     useState<Set<string>>(
       new Set(),
@@ -540,6 +784,77 @@ const [
     artists,
   ]);
 
+  async function lookupArtistByUsername(
+    username: string,
+  ) {
+    const trimmed = username.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/admin/artists?username=${encodeURIComponent(
+          trimmed,
+        )}`,
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return null;
+      }
+
+      return (data.artist ??
+        null) as ExistingCreator | null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function resolveExistingArtist(
+    username: string,
+    mergeIntoDraft: boolean,
+  ) {
+    const existing =
+      await lookupArtistByUsername(
+        username,
+      );
+
+    setExistingArtist(existing);
+
+    if (existing) {
+      setSelectedArtistId(existing.id);
+
+      if (mergeIntoDraft) {
+        setArtistProfileDraft(
+          (current) =>
+            current
+              ? mergeDraftWithExisting(
+                  current,
+                  existing,
+                )
+              : current,
+        );
+      } else {
+        setArtistProfileDraft(
+          (current) =>
+            current
+              ? {
+                  ...current,
+                  username:
+                    existing.username?.trim() ||
+                    current.username,
+                }
+              : current,
+        );
+      }
+    }
+
+    return existing;
+  }
+
   /*
     Channel
   */
@@ -562,6 +877,10 @@ const [
     setShorts([]);
     setVideos([]);
     setChannelNextPageToken(null);
+    setArtistProfileDraft(null);
+    setExistingArtist(null);
+    setProfileResearchSources([]);
+    setOnboardingResult(null);
 
     try {
       const response =
@@ -601,6 +920,34 @@ setNewArtist({
 
   category: "music",
 });
+
+if (data.channel) {
+  const draft =
+    buildArtistProfileDraft(
+      data.channel,
+      channelUrl,
+    );
+
+  const existing =
+    await lookupArtistByUsername(
+      draft.username,
+    );
+
+  if (existing) {
+    const merged =
+      mergeDraftWithExisting(
+        draft,
+        existing,
+      );
+
+    setExistingArtist(existing);
+    setArtistProfileDraft(merged);
+    setSelectedArtistId(existing.id);
+  } else {
+    setExistingArtist(null);
+    setArtistProfileDraft(draft);
+  }
+}
 
 setShorts(
   data.shorts ?? [],
@@ -1308,9 +1655,87 @@ function removeExternalImageDraft(
           next.delete(
             videoId,
           );
+
+          setFeaturedVideoIds(
+            (featured) => {
+              if (
+                !featured.has(
+                  videoId,
+                )
+              ) {
+                return featured;
+              }
+
+              const nextFeatured =
+                new Set(
+                  featured,
+                );
+
+              nextFeatured.delete(
+                videoId,
+              );
+
+              return nextFeatured;
+            },
+          );
         } else {
           next.add(
             videoId,
+          );
+        }
+
+        return next;
+      },
+    );
+  }
+
+  function toggleFeatured(
+    videoId: string,
+    event: React.MouseEvent,
+  ) {
+    event.stopPropagation();
+
+    setFeaturedVideoIds(
+      (current) => {
+        const next =
+          new Set(
+            current,
+          );
+
+        if (
+          next.has(
+            videoId,
+          )
+        ) {
+          next.delete(
+            videoId,
+          );
+        } else {
+          next.add(
+            videoId,
+          );
+
+          setSelectedVideoIds(
+            (selected) => {
+              if (
+                selected.has(
+                  videoId,
+                )
+              ) {
+                return selected;
+              }
+
+              const nextSelected =
+                new Set(
+                  selected,
+                );
+
+              nextSelected.add(
+                videoId,
+              );
+
+              return nextSelected;
+            },
           );
         }
 
@@ -1324,9 +1749,705 @@ function removeExternalImageDraft(
       new Set(),
     );
 
+    setFeaturedVideoIds(
+      new Set(),
+    );
+
     setSelectedImageIds(
       new Set(),
     );
+  }
+
+  function buildAnalysisCandidate(
+    video: YouTubeVideo,
+    sourceTab: WorkSourceTab,
+    artistName: string,
+  ) {
+    return {
+      id: video.id,
+      title: video.title,
+      ...(video.description
+        ? {
+            description:
+              video.description,
+          }
+        : {}),
+      ...(video.duration
+        ? { duration: video.duration }
+        : {}),
+      ...(typeof video.durationSeconds ===
+      "number"
+        ? {
+            durationSeconds:
+              video.durationSeconds,
+          }
+        : {}),
+      ...(typeof video.viewCount ===
+      "number"
+        ? { viewCount: video.viewCount }
+        : {}),
+      ...(typeof video.likeCount ===
+      "number"
+        ? { likeCount: video.likeCount }
+        : {}),
+      ...(video.channelTitle
+        ? {
+            channelTitle:
+              video.channelTitle,
+          }
+        : {}),
+      ...(video.publishedAt
+        ? {
+            publishedAt:
+              video.publishedAt,
+          }
+        : {}),
+      sourceTab,
+      ...(artistName
+        ? { artistName }
+        : {}),
+    };
+  }
+
+  function updateArtistProfileDraft(
+    patch: Partial<ArtistProfileDraft>,
+  ) {
+    setArtistProfileDraft(
+      (current) =>
+        current
+          ? {
+              ...current,
+              ...patch,
+            }
+          : current,
+    );
+  }
+
+  async function generateArtistProfileWithAI() {
+    if (
+      !aiAssistEnabled ||
+      !artistProfileDraft?.name.trim() ||
+      generatingProfile
+    ) {
+      return;
+    }
+
+    setGeneratingProfile(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/admin/generate-artist-profile",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            artistName:
+              artistProfileDraft.name.trim(),
+            ...(channel?.description
+              ? {
+                  channelDescription:
+                    channel.description,
+                }
+              : {}),
+            ...(artistProfileDraft.username.trim()
+              ? {
+                  youtubeHandle:
+                    artistProfileDraft.username.trim(),
+                }
+              : {}),
+            ...(artistProfileDraft.youtubeUrl.trim()
+              ? {
+                  youtubeUrl:
+                    artistProfileDraft.youtubeUrl.trim(),
+                }
+              : {}),
+          }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data.error === "string"
+            ? data.error
+            : "AI profile generation failed.",
+        );
+      }
+
+      const tagline =
+        typeof data.result?.tagline ===
+        "string"
+          ? data.result.tagline
+          : "";
+      const bio =
+        typeof data.result?.bio ===
+        "string"
+          ? data.result.bio
+          : "";
+
+      if (!tagline && !bio) {
+        throw new Error(
+          "AI profile generation failed.",
+        );
+      }
+
+      updateArtistProfileDraft({
+        ...(tagline ? { tagline } : {}),
+        ...(bio ? { bio } : {}),
+      });
+
+      const sources = Array.isArray(
+        data.result?.researchSummary
+          ?.sourcesUsed,
+      )
+        ? (data.result.researchSummary
+            .sourcesUsed as ResearchSource[])
+        : [];
+
+      setProfileResearchSources(
+        sources.filter(
+          (source) =>
+            typeof source?.url ===
+              "string" &&
+            source.url.trim(),
+        ),
+      );
+
+      setMessage(
+        "Artist Tagline과 Bio를 생성했습니다.",
+      );
+    } catch {
+      setError(
+        "AI 프로필 생성에 실패했습니다. 직접 입력하거나 다시 시도해주세요.",
+      );
+    } finally {
+      setGeneratingProfile(false);
+    }
+  }
+
+  async function analyzeCurrentTabWithAI(
+    force = false,
+  ) {
+    if (
+      !aiAssistEnabled ||
+      activeTab === "images" ||
+      analyzingWorks
+    ) {
+      return;
+    }
+
+    const currentWorks =
+      activeTab === "shorts"
+        ? shorts
+        : activeTab === "videos"
+          ? videos
+          : activeTab === "fancams"
+            ? fancamWorks
+            : additionalWorks;
+
+    const targets = force
+      ? currentWorks
+      : currentWorks.filter(
+          (video) =>
+            !workAnalyses[video.id],
+        );
+
+    if (targets.length === 0) {
+      setError(
+        "분석할 후보가 없습니다.",
+      );
+      return;
+    }
+
+    const artistName =
+      artists.find(
+        (artist) =>
+          artist.id ===
+          selectedArtistId,
+      )?.name ??
+      channel?.title ??
+      "";
+
+    setAnalyzingWorks(true);
+    setError("");
+    setMessage("");
+
+    let successCount = 0;
+    let failed = false;
+
+    for (
+      let index = 0;
+      index < targets.length;
+      index += ANALYZE_WORKS_BATCH_SIZE
+    ) {
+      const batch = targets.slice(
+        index,
+        index + ANALYZE_WORKS_BATCH_SIZE,
+      );
+
+      try {
+        const response = await fetch(
+          "/api/admin/analyze-works",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              artistName,
+              works: batch.map(
+                (video) =>
+                  buildAnalysisCandidate(
+                    video,
+                    activeTab,
+                    artistName,
+                  ),
+              ),
+            }),
+          },
+        );
+
+        const data =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            typeof data.error ===
+              "string"
+              ? data.error
+              : "AI analysis failed.",
+          );
+        }
+
+        const results = Array.isArray(
+          data.results,
+        )
+          ? (data.results as WorkAnalysis[])
+          : [];
+
+        setWorkAnalyses((current) => {
+          const next = { ...current };
+
+          for (const result of results) {
+            next[result.id] = result;
+          }
+
+          return next;
+        });
+
+        successCount += results.length;
+      } catch {
+        failed = true;
+        setError(
+          "AI 분석에 실패했습니다. 이미 분석된 결과는 유지됩니다.",
+        );
+        break;
+      }
+    }
+
+    if (!failed) {
+      setMessage(
+        `${successCount}개 영상을 분석했습니다.`,
+      );
+    }
+
+    setAnalyzingWorks(false);
+  }
+
+  function buildSelectedVideoPayload() {
+    return selectedVideoWorks.map(
+      (video) => ({
+        id: video.id,
+        title: video.title,
+        description: video.description,
+        thumbnail: video.thumbnail,
+        publishedAt: video.publishedAt,
+        url: video.url,
+        durationSeconds:
+          video.durationSeconds,
+        featured: featuredVideoIds.has(
+          video.id,
+        ),
+      }),
+    );
+  }
+
+  function buildOnboardingArtistPayload() {
+    if (!artistProfileDraft) {
+      return null;
+    }
+
+    return {
+      name: artistProfileDraft.name.trim(),
+      username:
+        artistProfileDraft.username.trim(),
+      category:
+        artistProfileDraft.category ||
+        "music",
+      tagline:
+        artistProfileDraft.tagline.trim(),
+      bio: artistProfileDraft.bio.trim(),
+      profileImage:
+        artistProfileDraft.profileImage.trim(),
+      coverImage:
+        artistProfileDraft.coverImageUrl.trim(),
+      youtubeUrl:
+        artistProfileDraft.youtubeUrl.trim(),
+      instagramUrl:
+        artistProfileDraft.instagramUrl.trim(),
+      tags: artistProfileDraft.tags,
+    };
+  }
+
+  function toggleDraftTag(
+    tag: ArtistTag,
+  ) {
+    setArtistProfileDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const selected =
+        current.tags.includes(tag);
+
+      return {
+        ...current,
+        tags: selected
+          ? current.tags.filter(
+              (item) => item !== tag,
+            )
+          : [...current.tags, tag],
+      };
+    });
+  }
+
+  async function importSelectedForArtist(
+    artist: {
+      id: string;
+      name: string;
+    },
+    actionLabel: "created" | "updated",
+  ) {
+    const featuredCount =
+      selectedVideoWorks.filter(
+        (video) =>
+          featuredVideoIds.has(video.id),
+      ).length;
+
+    let importedCount = 0;
+
+    if (selectedVideoWorks.length > 0) {
+      const importResponse =
+        await fetch(
+          "/api/admin/import-works",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              artistId: artist.id,
+              works:
+                buildSelectedVideoPayload(),
+            }),
+          },
+        );
+
+      const importData =
+        await importResponse.json();
+
+      if (!importResponse.ok) {
+        setOnboardingResult({
+          artistId: artist.id,
+          artistName: artist.name,
+          importedCount: 0,
+          featuredCount: 0,
+          artistCreated: true,
+          importFailed: true,
+        });
+
+        setError(
+          actionLabel === "created"
+            ? "Artist was created, but some works failed to import."
+            : "Artist was updated, but some works failed to import.",
+        );
+        return;
+      }
+
+      importedCount =
+        importData.importedCount ?? 0;
+    }
+
+    setOnboardingResult({
+      artistId: artist.id,
+      artistName: artist.name,
+      importedCount,
+      featuredCount,
+      artistCreated: true,
+      importFailed: false,
+    });
+
+    setMessage(
+      `${artist.name} ${actionLabel} · Imported ${importedCount} works · Featured ${featuredCount}`,
+    );
+  }
+
+  async function switchToExistingArtist(
+    artist: ExistingCreator,
+  ) {
+    setExistingArtist(artist);
+    setSelectedArtistId(artist.id);
+    setArtistProfileDraft((current) =>
+      current
+        ? mergeDraftWithExisting(
+            current,
+            artist,
+          )
+        : current,
+    );
+    setArtists((current) => {
+      if (
+        current.some(
+          (item) => item.id === artist.id,
+        )
+      ) {
+        return current;
+      }
+
+      return [
+        ...current,
+        {
+          id: artist.id,
+          name: artist.name,
+          username: artist.username,
+        },
+      ].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+    });
+  }
+
+  async function createArtistAndImportSelected() {
+    if (
+      !aiAssistEnabled ||
+      !artistProfileDraft ||
+      creatingOnboarding ||
+      existingArtist
+    ) {
+      return;
+    }
+
+    const payload =
+      buildOnboardingArtistPayload();
+
+    if (!payload?.name) {
+      setError(
+        "Artist name을 입력해주세요.",
+      );
+      return;
+    }
+
+    setCreatingOnboarding(true);
+    setError("");
+    setMessage("");
+    setOnboardingResult(null);
+
+    let createdArtist:
+      | Artist
+      | null = null;
+
+    try {
+      const createResponse =
+        await fetch(
+          "/api/admin/artists",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        );
+
+      const createData =
+        await createResponse.json();
+
+      if (
+        createResponse.status === 409 ||
+        createData.code ===
+          "username_taken"
+      ) {
+        const existing =
+          (createData.artist as
+            | ExistingCreator
+            | null) ??
+          (await lookupArtistByUsername(
+            payload.username,
+          ));
+
+        if (existing) {
+          await switchToExistingArtist(
+            existing,
+          );
+        }
+
+        setError(
+          "An artist with this username already exists.",
+        );
+        return;
+      }
+
+      if (!createResponse.ok) {
+        throw new Error(
+          createData.error ||
+            "Artist 생성에 실패했습니다.",
+        );
+      }
+
+      createdArtist =
+        createData.artist as Artist;
+
+      setArtists((current) =>
+        [...current, createdArtist!].sort(
+          (a, b) =>
+            a.name.localeCompare(b.name),
+        ),
+      );
+
+      setSelectedArtistId(
+        createdArtist.id,
+      );
+
+      await importSelectedForArtist(
+        createdArtist,
+        "created",
+      );
+    } catch (error) {
+      if (createdArtist) {
+        setOnboardingResult({
+          artistId: createdArtist.id,
+          artistName: createdArtist.name,
+          importedCount: 0,
+          featuredCount: 0,
+          artistCreated: true,
+          importFailed: true,
+        });
+
+        setError(
+          "Artist was created, but some works failed to import.",
+        );
+      } else if (
+        error instanceof Error
+      ) {
+        setError(error.message);
+      } else {
+        setError(
+          "Artist 생성에 실패했습니다.",
+        );
+      }
+    } finally {
+      setCreatingOnboarding(false);
+    }
+  }
+
+  async function updateArtistAndImportSelected() {
+    if (
+      !aiAssistEnabled ||
+      !artistProfileDraft ||
+      !existingArtist ||
+      creatingOnboarding
+    ) {
+      return;
+    }
+
+    const payload =
+      buildOnboardingArtistPayload();
+
+    if (!payload?.name) {
+      setError(
+        "Artist name을 입력해주세요.",
+      );
+      return;
+    }
+
+    setCreatingOnboarding(true);
+    setError("");
+    setMessage("");
+    setOnboardingResult(null);
+
+    try {
+      const updateResponse =
+        await fetch(
+          `/api/admin/artists/${existingArtist.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              ...payload,
+              isCurated: true,
+            }),
+          },
+        );
+
+      const updateData =
+        await updateResponse.json();
+
+      if (!updateResponse.ok) {
+        throw new Error(
+          updateData.error ||
+            "Artist 업데이트에 실패했습니다.",
+        );
+      }
+
+      const updatedArtist = {
+        id: existingArtist.id,
+        name:
+          (updateData.artist?.name as
+            | string
+            | undefined) ??
+          payload.name,
+      };
+
+      setExistingArtist((current) =>
+        current
+          ? {
+              ...current,
+              ...updateData.artist,
+            }
+          : current,
+      );
+
+      setSelectedArtistId(
+        existingArtist.id,
+      );
+
+      await importSelectedForArtist(
+        updatedArtist,
+        "updated",
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError(
+          "Artist 업데이트에 실패했습니다.",
+        );
+      }
+    } finally {
+      setCreatingOnboarding(false);
+    }
   }
 
   /*
@@ -1460,10 +2581,12 @@ function removeExternalImageDraft(
         sortYouTubeVideos(
           shorts,
           youtubeVideoSort,
+          workAnalyses,
         ),
       [
         shorts,
         youtubeVideoSort,
+        workAnalyses,
       ],
     );
 
@@ -1473,10 +2596,12 @@ function removeExternalImageDraft(
         sortYouTubeVideos(
           videos,
           youtubeVideoSort,
+          workAnalyses,
         ),
       [
         videos,
         youtubeVideoSort,
+        workAnalyses,
       ],
     );
 
@@ -1486,10 +2611,27 @@ function removeExternalImageDraft(
         sortYouTubeVideos(
           fancamWorks,
           youtubeVideoSort,
+          workAnalyses,
         ),
       [
         fancamWorks,
         youtubeVideoSort,
+        workAnalyses,
+      ],
+    );
+
+  const sortedAdditionalWorks =
+    useMemo(
+      () =>
+        sortYouTubeVideos(
+          additionalWorks,
+          youtubeVideoSort,
+          workAnalyses,
+        ),
+      [
+        additionalWorks,
+        youtubeVideoSort,
+        workAnalyses,
       ],
     );
 
@@ -1502,7 +2644,7 @@ function removeExternalImageDraft(
           ? sortedFancamWorks
           : activeTab ===
               "additional"
-            ? additionalWorks
+            ? sortedAdditionalWorks
             : [];
 
   const allVideoWorks =
@@ -1609,7 +2751,7 @@ function removeExternalImageDraft(
                       selectedArtistId,
 
                     works:
-                      selectedVideoWorks,
+                      buildSelectedVideoPayload(),
                   },
                 ),
             },
@@ -1861,15 +3003,39 @@ if (
 
       {/* YouTube */}
       <section className="rounded-2xl border border-zinc-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-zinc-950">
-          YouTube Channel
-        </h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-950">
+              YouTube Channel
+            </h2>
 
-        <p className="mt-1 text-sm text-zinc-500">
-          Shorts와 일반
-          영상을 자동으로
-          불러옵니다.
-        </p>
+            <p className="mt-1 text-sm text-zinc-500">
+              Shorts와 일반
+              영상을 자동으로
+              불러옵니다.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setAiAssistEnabled(
+                (current) => !current,
+              )
+            }
+            aria-pressed={aiAssistEnabled}
+            className={`self-start rounded-lg px-3 py-1.5 text-sm font-medium ${
+              aiAssistEnabled
+                ? "bg-zinc-950 text-white"
+                : "border border-zinc-200 text-zinc-600"
+            }`}
+          >
+            AI Assist{" "}
+            {aiAssistEnabled
+              ? "ON"
+              : "OFF"}
+          </button>
+        </div>
 
         <div className="mt-5 flex gap-3">
           <input
@@ -1895,6 +3061,444 @@ if (
           </button>
         </div>
       </section>
+
+      {aiAssistEnabled &&
+        artistProfileDraft && (
+          <section className="mt-5 rounded-2xl border border-zinc-200 bg-white p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p
+                  className={`text-xs font-semibold uppercase tracking-wide ${
+                    existingArtist
+                      ? "text-amber-700"
+                      : "text-zinc-500"
+                  }`}
+                >
+                  {existingArtist
+                    ? "Existing Artist Found"
+                    : "New Artist"}
+                </p>
+
+                <h2 className="mt-1 text-lg font-semibold text-zinc-950">
+                  Artist Profile Draft
+                </h2>
+
+                <p className="mt-1 text-sm text-zinc-500">
+                  YouTube 채널에서 채운
+                  초안입니다. 직접
+                  수정하거나 원할 때만
+                  웹 리서치로 Tagline/Bio를
+                  생성할 수 있습니다.
+                </p>
+
+                {existingArtist && (
+                  <div className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p>
+                      {existingArtist.name}
+                      {existingArtist.username
+                        ? ` · @${existingArtist.username}`
+                        : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800">
+                      Artist ID:{" "}
+                      {existingArtist.id}
+                    </p>
+                    <Link
+                      href={`/creator/${existingArtist.id}`}
+                      className="mt-2 inline-block text-sm font-medium underline"
+                    >
+                      View Existing Profile
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={
+                  generateArtistProfileWithAI
+                }
+                disabled={
+                  generatingProfile ||
+                  !artistProfileDraft.name.trim()
+                }
+                className="self-start rounded-lg bg-zinc-950 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+              >
+                {generatingProfile
+                  ? "Researching..."
+                  : "Research & Generate Profile"}
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-zinc-700">
+                  Category
+                </span>
+                <select
+                  value={
+                    artistProfileDraft.category
+                  }
+                  onChange={(event) =>
+                    updateArtistProfileDraft(
+                      {
+                        category:
+                          event.target
+                            .value,
+                      },
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm"
+                >
+                  <option value="music">
+                    Music
+                  </option>
+                  <option value="dance">
+                    Dance
+                  </option>
+                  <option value="art">
+                    Art
+                  </option>
+                  <option value="cosplay">
+                    Cosplay
+                  </option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-zinc-700">
+                  Artist Name
+                </span>
+                <input
+                  value={
+                    artistProfileDraft.name
+                  }
+                  onChange={(event) =>
+                    updateArtistProfileDraft(
+                      {
+                        name: event
+                          .target
+                          .value,
+                      },
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-zinc-700">
+                  Username
+                </span>
+                <input
+                  value={
+                    artistProfileDraft.username
+                  }
+                  onChange={(event) =>
+                    updateArtistProfileDraft(
+                      {
+                        username:
+                          event.target
+                            .value,
+                      },
+                    )
+                  }
+                  onBlur={() =>
+                    void resolveExistingArtist(
+                      artistProfileDraft.username,
+                      false,
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-zinc-700">
+                  YouTube URL
+                </span>
+                <input
+                  value={
+                    artistProfileDraft.youtubeUrl
+                  }
+                  onChange={(event) =>
+                    updateArtistProfileDraft(
+                      {
+                        youtubeUrl:
+                          event.target
+                            .value,
+                      },
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-zinc-700">
+                  Instagram URL
+                </span>
+                <input
+                  value={
+                    artistProfileDraft.instagramUrl
+                  }
+                  onChange={(event) =>
+                    updateArtistProfileDraft(
+                      {
+                        instagramUrl:
+                          event.target
+                            .value,
+                      },
+                    )
+                  }
+                  placeholder="https://instagram.com/artist"
+                  className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-[auto_1fr]">
+              <div>
+                <span className="mb-2 block text-sm font-medium text-zinc-700">
+                  Profile Image
+                </span>
+                {artistProfileDraft.profileImage ? (
+                  <img
+                    src={
+                      artistProfileDraft.profileImage
+                    }
+                    alt=""
+                    className="h-20 w-20 rounded-full border border-zinc-200 object-cover"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-zinc-200 text-xs text-zinc-400">
+                    None
+                  </div>
+                )}
+              </div>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-zinc-700">
+                  Profile Image URL
+                </span>
+                <input
+                  value={
+                    artistProfileDraft.profileImage
+                  }
+                  onChange={(event) =>
+                    updateArtistProfileDraft(
+                      {
+                        profileImage:
+                          event.target
+                            .value,
+                      },
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+                />
+              </label>
+            </div>
+
+            <label className="mt-4 block">
+              <span className="mb-2 block text-sm font-medium text-zinc-700">
+                Cover Image URL
+              </span>
+              <input
+                value={
+                  artistProfileDraft.coverImageUrl
+                }
+                onChange={(event) =>
+                  updateArtistProfileDraft(
+                    {
+                      coverImageUrl:
+                        event.target
+                          .value,
+                    },
+                  )
+                }
+                placeholder="직접 입력"
+                className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+              />
+            </label>
+
+            <div className="mt-5">
+              <span className="mb-3 block text-sm font-medium text-zinc-700">
+                Tags
+              </span>
+
+              <div className="flex flex-wrap gap-2">
+                {TAG_OPTIONS.map(
+                  (tag) => {
+                    const selected =
+                      artistProfileDraft.tags.includes(
+                        tag,
+                      );
+
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() =>
+                          toggleDraftTag(
+                            tag,
+                          )
+                        }
+                        className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                          selected
+                            ? "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700"
+                            : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50"
+                        }`}
+                      >
+                        {selected
+                          ? `${tag} ✓`
+                          : tag}
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+
+              <p className="mt-3 text-xs text-zinc-400">
+                Multiple tags can be selected.
+              </p>
+            </div>
+
+            <label className="mt-4 block">
+              <span className="mb-2 block text-sm font-medium text-zinc-700">
+                Tagline
+              </span>
+              <input
+                value={
+                  artistProfileDraft.tagline
+                }
+                onChange={(event) =>
+                  updateArtistProfileDraft(
+                    {
+                      tagline:
+                        event.target
+                          .value,
+                    },
+                  )
+                }
+                placeholder="짧은 영어 한 문장"
+                className="h-11 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+              />
+            </label>
+
+            <label className="mt-4 block">
+              <span className="mb-2 block text-sm font-medium text-zinc-700">
+                Bio
+              </span>
+              <textarea
+                value={
+                  artistProfileDraft.bio
+                }
+                onChange={(event) =>
+                  updateArtistProfileDraft(
+                    {
+                      bio: event.target
+                        .value,
+                    },
+                  )
+                }
+                placeholder="Kovemu Artist Profile용 영어 소개"
+                rows={8}
+                className="w-full rounded-xl border border-zinc-200 px-4 py-3 text-sm"
+              />
+            </label>
+
+            {profileResearchSources.length >
+              0 && (
+              <div className="mt-4">
+                <p className="text-xs font-medium text-zinc-500">
+                  Sources used
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {profileResearchSources.map(
+                    (source) => (
+                      <li
+                        key={
+                          source.url
+                        }
+                        className="truncate text-xs text-zinc-400"
+                      >
+                        <a
+                          href={
+                            source.url
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:text-zinc-700"
+                        >
+                          {source.title ||
+                            source.url}
+                        </a>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {onboardingResult && (
+              <div className="mt-4 rounded-xl bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+                <p>
+                  {onboardingResult.artistName}{" "}
+                  · Imported{" "}
+                  {
+                    onboardingResult.importedCount
+                  }{" "}
+                  works · Featured{" "}
+                  {
+                    onboardingResult.featuredCount
+                  }
+                </p>
+                <Link
+                  href={`/creator/${onboardingResult.artistId}`}
+                  className="mt-2 inline-block text-sm font-medium text-zinc-950 underline"
+                >
+                  View Artist Profile
+                </Link>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end border-t border-zinc-200 pt-5">
+              {existingArtist ? (
+                <button
+                  type="button"
+                  onClick={
+                    updateArtistAndImportSelected
+                  }
+                  disabled={
+                    creatingOnboarding ||
+                    !artistProfileDraft.name.trim()
+                  }
+                  className="rounded-xl bg-zinc-950 px-6 py-3 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  {creatingOnboarding
+                    ? "Updating..."
+                    : "Update Artist & Import Selected"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={
+                    createArtistAndImportSelected
+                  }
+                  disabled={
+                    creatingOnboarding ||
+                    !artistProfileDraft.name.trim()
+                  }
+                  className="rounded-xl bg-zinc-950 px-6 py-3 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  {creatingOnboarding
+                    ? "Creating..."
+                    : "Create Artist & Import Selected"}
+                </button>
+              )}
+            </div>
+          </section>
+        )}
 
       {/* Fancam Search */}
       <section className="mt-5 rounded-2xl border border-zinc-200 bg-white p-6">
@@ -2545,14 +4149,8 @@ if (
         "images" &&
         hasVideoWorks && (
           <section className="mt-6">
-            {(activeTab ===
-              "shorts" ||
-              activeTab ===
-                "videos" ||
-              activeTab ===
-                "fancams") &&
-              displayedVideos.length >
-                0 && (
+            {displayedVideos.length >
+              0 && (
                 <div className="mb-4 flex flex-col gap-3 border-b border-zinc-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm font-semibold text-zinc-950">
                     {activeTab ===
@@ -2561,10 +4159,48 @@ if (
                       : activeTab ===
                           "videos"
                         ? `Videos (${videos.length})`
-                        : `Fancams (${fancamWorks.length})`}
+                        : activeTab ===
+                            "fancams"
+                          ? `Fancams (${fancamWorks.length})`
+                          : `Additional (${additionalWorks.length})`}
                   </p>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    {aiAssistEnabled && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          analyzeCurrentTabWithAI(
+                            displayedVideos.every(
+                              (video) =>
+                                Boolean(
+                                  workAnalyses[
+                                    video
+                                      .id
+                                  ],
+                                ),
+                            ),
+                          )
+                        }
+                        disabled={
+                          analyzingWorks
+                        }
+                        className="rounded-lg bg-zinc-950 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                      >
+                        {analyzingWorks
+                          ? "Analyzing..."
+                          : displayedVideos.every(
+                                (video) =>
+                                  workAnalyses[
+                                    video
+                                      .id
+                                  ],
+                              )
+                            ? "Re-analyze"
+                            : "Analyze with AI"}
+                      </button>
+                    )}
+
                     <span className="text-xs font-medium text-zinc-500">
                       Sort
                     </span>
@@ -2608,6 +4244,14 @@ if (
                     selectedVideoIds.has(
                       video.id,
                     );
+                  const featured =
+                    featuredVideoIds.has(
+                      video.id,
+                    );
+                  const analysis =
+                    workAnalyses[
+                      video.id
+                    ];
 
                   return (
                     <article
@@ -2642,8 +4286,43 @@ if (
     className="h-full w-full"
   />
 
-  <div className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold">
-    {selected ? "✓" : ""}
+  <div className="absolute left-3 top-3 z-10">
+    <button
+      type="button"
+      onClick={(
+        event,
+      ) => {
+        event.stopPropagation();
+        toggleVideo(
+          video.id,
+        );
+      }}
+      aria-pressed={
+        selected
+      }
+      aria-label={
+        selected
+          ? "Deselect work for import"
+          : "Select work for import"
+      }
+      className={`flex h-9 w-9 items-center justify-center rounded-full border-2 shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950 ${
+        selected
+          ? "border-zinc-950 bg-zinc-950 text-white"
+          : "border-zinc-300 bg-white text-zinc-950 hover:border-zinc-950 hover:bg-zinc-50"
+      }`}
+    >
+      <Check
+        className={`h-5 w-5 ${
+          selected
+            ? "opacity-100"
+            : "opacity-0"
+        }`}
+        strokeWidth={
+          3
+        }
+        aria-hidden="true"
+      />
+    </button>
   </div>
 
   {(video.duration ||
@@ -2666,6 +4345,14 @@ if (
                             video.title
                           }
                         </h3>
+
+                        {analysis && (
+                          <WorkAnalysisBadges
+                            analysis={
+                              analysis
+                            }
+                          />
+                        )}
 
                         {video.publishedAt && (
                           <p className="mt-1 text-xs text-zinc-400">
@@ -2694,6 +4381,35 @@ if (
                               : ""}
                           </p>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={(
+                            event,
+                          ) =>
+                            toggleFeatured(
+                              video.id,
+                              event,
+                            )
+                          }
+                          aria-pressed={
+                            featured
+                          }
+                          className={`mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950 ${
+                            featured
+                              ? "bg-violet-50 text-violet-700 ring-1 ring-violet-200"
+                              : "bg-zinc-50 text-zinc-500 ring-1 ring-zinc-200 hover:bg-zinc-100"
+                          }`}
+                        >
+                          <span
+                            aria-hidden="true"
+                          >
+                            {featured
+                              ? "★"
+                              : "☆"}
+                          </span>
+                          Featured
+                        </button>
                       </div>
                     </article>
                   );
@@ -3049,6 +4765,56 @@ async function convertImageToWebP(
       type:
         "image/webp",
     },
+  );
+}
+
+const CONTENT_TYPE_LABELS: Record<
+  WorkAnalysis["contentType"],
+  string
+> = {
+  live_stage: "LIVE",
+  fancam: "FANCAM",
+  performance: "PERFORMANCE",
+  visual: "VISUAL",
+  challenge: "CHALLENGE",
+  behind: "BEHIND",
+  mv: "MV",
+  other: "OTHER",
+};
+
+function WorkAnalysisBadges({
+  analysis,
+}: {
+  analysis: WorkAnalysis;
+}) {
+  const actionClass =
+    analysis.action === "keep"
+      ? "bg-emerald-50 text-emerald-700"
+      : analysis.action === "featured"
+        ? "bg-violet-50 text-violet-700"
+        : analysis.action === "reject"
+          ? "bg-red-50 text-red-700"
+          : "bg-amber-50 text-amber-700";
+
+  return (
+    <div
+      className="mt-2 flex flex-wrap gap-1"
+      title={analysis.reason}
+    >
+      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-zinc-700">
+        AI {analysis.discoveryScore}
+      </span>
+      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-zinc-600">
+        {CONTENT_TYPE_LABELS[
+          analysis.contentType
+        ]}
+      </span>
+      <span
+        className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${actionClass}`}
+      >
+        {analysis.action}
+      </span>
+    </div>
   );
 }
 

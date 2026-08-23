@@ -12,6 +12,7 @@ type ImportWork = {
   publishedAt?: string;
   url: string;
   durationSeconds?: number;
+  featured?: boolean;
 };
 
 export async function POST(request: NextRequest) {
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
 
       published_at: work.publishedAt || null,
       duration_seconds: work.durationSeconds ?? null,
+      featured: work.featured === true,
     }));
 
     const { data, error } = await supabaseAdmin

@@ -204,6 +204,22 @@ export async function PATCH(
         .single();
 
     if (error) {
+      if (
+        error.code === "23505" ||
+        (error.message ?? "").includes(
+          "creators_username_key",
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "An artist with this username already exists.",
+            code: "username_taken",
+          },
+          { status: 409 },
+        );
+      }
+
       console.error(
         "UPDATE ARTIST ERROR:",
         error,

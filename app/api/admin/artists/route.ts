@@ -11,6 +11,117 @@ const supabaseUrl =
 const serviceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+const ARTIST_SELECT = `
+  id,
+  name,
+  username,
+  category,
+  bio,
+  tagline,
+  profile_image,
+  cover_image,
+  youtube_url,
+  instagram_url,
+  tags,
+  is_curated
+`;
+
+function isUsernameConflict(
+  error: {
+    code?: string;
+    message?: string;
+  },
+) {
+  return (
+    error.code === "23505" ||
+    (error.message ?? "").includes(
+      "creators_username_key",
+    )
+  );
+}
+
+export async function GET(
+  request: NextRequest,
+) {
+  try {
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        {
+          error:
+            "Supabase server configuration is missing.",
+        },
+        { status: 500 },
+      );
+    }
+
+    const username =
+      request.nextUrl.searchParams
+        .get("username")
+        ?.trim() ?? "";
+
+    if (!username) {
+      return NextResponse.json(
+        {
+          error:
+            "Username is required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const supabaseAdmin =
+      createClient(
+        supabaseUrl,
+        serviceRoleKey,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        },
+      );
+
+    const { data, error } =
+      await supabaseAdmin
+        .from("creators")
+        .select(ARTIST_SELECT)
+        .ilike("username", username)
+        .maybeSingle();
+
+    if (error) {
+      console.error(
+        "LOOKUP ARTIST API ERROR:",
+        error,
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Failed to look up artist.",
+        },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({
+      artist: data ?? null,
+    });
+  } catch (error) {
+    console.error(
+      "LOOKUP ARTIST SERVER ERROR:",
+      error,
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Unexpected server error.",
+      },
+      { status: 500 },
+    );
+  }
+}
+
 export async function POST(
   request: NextRequest,
 ) {
@@ -56,6 +167,31 @@ export async function POST(
       typeof body.youtubeUrl === "string"
         ? body.youtubeUrl.trim()
         : "";
+
+    const tagline =
+      typeof body.tagline === "string"
+        ? body.tagline.trim()
+        : "";
+
+    const coverImage =
+      typeof body.coverImage === "string"
+        ? body.coverImage.trim()
+        : "";
+
+    const instagramUrl =
+      typeof body.instagramUrl === "string"
+        ? body.instagramUrl.trim()
+        : "";
+
+    const tags = Array.isArray(body.tags)
+      ? body.tags
+          .filter(
+            (tag: unknown): tag is string =>
+              typeof tag === "string",
+          )
+          .map((tag: string) => tag.trim())
+          .filter(Boolean)
+      : [];
 
     /*
       Required fields
@@ -126,27 +262,56 @@ export async function POST(
           bio:
             bio || null,
 
+          tagline:
+            tagline || null,
+
           profile_image:
             profileImage || null,
+
+          cover_image:
+            coverImage || null,
 
           youtube_url:
             youtubeUrl || null,
 
+          instagram_url:
+            instagramUrl || null,
+
+          tags,
+
           is_curated: true,
         })
-        .select(`
-          id,
-          name,
-          username,
-          category,
-          bio,
-          profile_image,
-          youtube_url,
-          is_curated
-        `)
+        .select(ARTIST_SELECT)
         .single();
 
     if (error) {
+      if (isUsernameConflict(error)) {
+        const existing =
+          username
+            ? await supabaseAdmin
+                .from("creators")
+                .select(ARTIST_SELECT)
+                .ilike(
+                  "username",
+                  username,
+                )
+                .maybeSingle()
+            : {
+                data: null,
+              };
+
+        return NextResponse.json(
+          {
+            error:
+              "An artist with this username already exists.",
+            code: "username_taken",
+            artist:
+              existing.data ?? null,
+          },
+          { status: 409 },
+        );
+      }
+
       console.error(
         "CREATE ARTIST API ERROR:",
         error,

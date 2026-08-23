@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { extractInstagramUrl } from "@/lib/youtube/extractInstagramUrl";
+
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 const SHORTS_LIMIT_SECONDS = 150;
@@ -268,14 +270,24 @@ export async function GET(request: NextRequest) {
         video.durationSeconds > SHORTS_LIMIT_SECONDS
     );
 
+    const channelDescription =
+      channel.snippet.description ?? "";
+
     return NextResponse.json({
       channel: {
         id: channel.id,
         title: channel.snippet.title,
-        description: channel.snippet.description,
+        description: channelDescription,
         thumbnail:
           channel.snippet.thumbnails?.high?.url ||
           channel.snippet.thumbnails?.default?.url,
+        customUrl:
+          channel.snippet.customUrl ??
+          "",
+        instagramUrl:
+          extractInstagramUrl(
+            channelDescription,
+          ),
       },
 
       shorts,
