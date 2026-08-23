@@ -8,6 +8,9 @@ import {
 } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import YouTubePreviewModal, {
+  YouTubePreviewThumbnail,
+} from "@/components/admin/YouTubePreviewModal";
 
 type YouTubeVideo = {
   id: string;
@@ -370,6 +373,14 @@ const [
     useState<Set<string>>(
       new Set(),
     );
+
+  const [
+    previewVideo,
+    setPreviewVideo,
+  ] = useState<{
+    videoId: string;
+    title: string;
+  } | null>(null);
 
   /*
     Artist
@@ -2615,10 +2626,20 @@ if (
                       }`}
                     >
                       <div className="relative aspect-video">
-  <img
-    src={video.thumbnail}
-    alt={video.title}
-    className="h-full w-full object-cover"
+  <YouTubePreviewThumbnail
+    url={video.url}
+    title={video.title}
+    thumbnail={video.thumbnail}
+    onPreview={(
+      videoId,
+      title,
+    ) =>
+      setPreviewVideo({
+        videoId,
+        title,
+      })
+    }
+    className="h-full w-full"
   />
 
   <div className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold">
@@ -2903,6 +2924,20 @@ if (
             </button>
           </div>
         </section>
+      )}
+
+      {previewVideo && (
+        <YouTubePreviewModal
+          videoId={
+            previewVideo.videoId
+          }
+          title={
+            previewVideo.title
+          }
+          onClose={() =>
+            setPreviewVideo(null)
+          }
+        />
       )}
     </main>
   );

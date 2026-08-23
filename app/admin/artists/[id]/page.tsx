@@ -15,6 +15,10 @@ import {
 import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/client";
+import YouTubePreviewModal, {
+  YouTubePreviewThumbnail,
+  extractYouTubeVideoId,
+} from "@/components/admin/YouTubePreviewModal";
 
 const TAG_OPTIONS = [
   "K-pop",
@@ -72,6 +76,35 @@ function clampPosition(value: number) {
   return Math.min(
     100,
     Math.max(0, value),
+  );
+}
+
+function getWorkYouTubePreviewUrl(
+  work: Work,
+) {
+  if (
+    work.source === "youtube" &&
+    work.source_id
+  ) {
+    return `https://www.youtube.com/watch?v=${work.source_id}`;
+  }
+
+  return work.source_url;
+}
+
+function canPreviewWork(
+  work: Work,
+) {
+  if (work.source !== "youtube") {
+    return false;
+  }
+
+  return Boolean(
+    extractYouTubeVideoId(
+      getWorkYouTubePreviewUrl(
+        work,
+      ),
+    ),
   );
 }
 
@@ -211,6 +244,14 @@ const [
 
   const [error, setError] =
     useState("");
+
+  const [
+    previewVideo,
+    setPreviewVideo,
+  ] = useState<{
+    videoId: string;
+    title: string;
+  } | null>(null);
 
   /*
     Load Artist + Works
@@ -914,6 +955,7 @@ async function saveWorkEdit() {
   }
 
   return (
+    <>
     <main className="min-h-screen bg-zinc-50">
       <div className="mx-auto max-w-7xl px-6 py-12">
         {/* Header */}
@@ -1455,15 +1497,57 @@ async function saveWorkEdit() {
                     >
                       {work.thumbnail_url && (
                         <div className="relative aspect-video overflow-hidden bg-zinc-100">
-                          <img
-                            src={work.thumbnail_url}
-                            alt={work.title || "Work"}
-                            className="h-full w-full object-cover"
-                          />
+                          {canPreviewWork(
+                            work,
+                          ) ? (
+                            <YouTubePreviewThumbnail
+                              url={getWorkYouTubePreviewUrl(
+                                work,
+                              )}
+                              title={
+                                work.title ||
+                                work.description ||
+                                "Work"
+                              }
+                              thumbnail={
+                                work.thumbnail_url
+                              }
+                              onPreview={(
+                                videoId,
+                                title,
+                              ) =>
+                                setPreviewVideo(
+                                  {
+                                    videoId,
+                                    title,
+                                  },
+                                )
+                              }
+                              className="h-full w-full"
+                            />
+                          ) : (
+                            <img
+                              src={
+                                work.thumbnail_url
+                              }
+                              alt={
+                                work.title ||
+                                "Work"
+                              }
+                              className="h-full w-full object-cover"
+                            />
+                          )}
 
                           <button
                             type="button"
-                            onClick={() => deleteWork(work)}
+                            onClick={(
+                              event,
+                            ) => {
+                              event.stopPropagation();
+                              deleteWork(
+                                work,
+                              );
+                            }}
                             className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-sm text-white transition hover:bg-red-600"
                             title="Delete work"
                           >
@@ -1680,5 +1764,20 @@ async function saveWorkEdit() {
   </div>
 )}
     </main>
+
+    {previewVideo && (
+      <YouTubePreviewModal
+        videoId={
+          previewVideo.videoId
+        }
+        title={
+          previewVideo.title
+        }
+        onClose={() =>
+          setPreviewVideo(null)
+        }
+      />
+    )}
+    </>
   );
 }
