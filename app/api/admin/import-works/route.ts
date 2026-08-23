@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+import { buildCanonicalTikTokUrl } from "@/lib/tiktok/extractTikTokVideoId";
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -13,7 +15,12 @@ type ImportWork = {
   url: string;
   durationSeconds?: number;
   featured?: boolean;
+  source?: string;
 };
+
+function resolveWorkSource(source: unknown) {
+  return source === "tiktok" ? "tiktok" : "youtube";
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,29 +61,42 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    const rows = works.map((work) => ({
-      artist_id: artistId,
+    const rows = works.map((work) => {
+      const source = resolveWorkSource(work.source);
+      const sourceUrl =
+        source === "tiktok"
+          ? buildCanonicalTikTokUrl(work.url) ??
+            work.url
+          : work.url;
 
-      type: "video",
-      source: "youtube",
+      return {
+        artist_id: artistId,
 
-      source_id: work.id,
-      source_url: work.url,
+        type: "video",
+        source,
 
-      title: work.title,
-      description: work.description || null,
-      thumbnail_url: work.thumbnail || null,
+        source_id: work.id,
+        source_url: sourceUrl,
 
-      published_at: work.publishedAt || null,
-      duration_seconds: work.durationSeconds ?? null,
-      featured: work.featured === true,
-    }));
+        title: work.title,
+        description: work.description || null,
+        thumbnail_url: work.thumbnail || null,
+
+        published_at:
+          work.publishedAt ||
+          (source === "tiktok"
+            ? new Date().toISOString()
+            : null),
+        duration_seconds: work.durationSeconds ?? null,
+        featured: work.featured === true,
+      };
+    });
 
     const { data, error } = await supabaseAdmin
       .from("works")
       .upsert(rows, {
         onConflict: "source,source_id",
-        ignoreDuplicates: true,
+        ignoreDuplicates: false,
       })
       .select();
 

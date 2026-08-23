@@ -18,7 +18,7 @@ type ProfilePickWork = {
 
   image?: string;
   videoId?: string;
-  type?: "image" | "youtube";
+  type?: "image" | "youtube" | "tiktok";
 
   caption?: string | null;
 };
@@ -241,6 +241,9 @@ export default function ProfileMyPicks() {
             const youtube =
               work.source ===
               "youtube";
+            const tiktok =
+              work.source ===
+              "tiktok";
 
             return {
               id: String(
@@ -260,19 +263,21 @@ export default function ProfileMyPicks() {
 
               type: youtube
                 ? "youtube"
-                : "image",
+                : tiktok
+                  ? "tiktok"
+                  : "image",
 
               videoId:
-                youtube
+                youtube || tiktok
                   ? work.source_id ??
                     undefined
                   : undefined,
 
               image:
                 work.thumbnail_url ??
-                (!youtube
-                  ? work.source_url
-                  : undefined),
+                (youtube || tiktok
+                  ? undefined
+                  : work.source_url),
 
               caption:
                 work.description ??

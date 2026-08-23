@@ -20,7 +20,7 @@ type PickPanelWork = {
   category?: string;
   image?: string;
   videoId?: string;
-  type?: "image" | "youtube";
+  type?: "image" | "youtube" | "tiktok";
   caption?: string | null;
   sourceUrl?: string;
 };
@@ -86,6 +86,9 @@ function mapPickedWork(
   const isYoutube =
     work.source === "youtube" &&
     Boolean(work.source_id);
+  const isTikTok =
+    work.source === "tiktok" &&
+    Boolean(work.source_id);
 
   return {
     id: String(work.id),
@@ -95,13 +98,15 @@ function mapPickedWork(
       artist.category,
     type: isYoutube
       ? "youtube"
-      : "image",
-    videoId: isYoutube
+      : isTikTok
+        ? "tiktok"
+        : "image",
+    videoId: isYoutube || isTikTok
       ? work.source_id ?? undefined
       : undefined,
     image:
       work.thumbnail_url ??
-      (isYoutube
+      (isYoutube || isTikTok
         ? undefined
         : work.source_url),
     caption:
@@ -750,7 +755,9 @@ function changeFilter(
                                 );
 
                               if (
-                                !thumbnail
+                                !thumbnail &&
+                                work.type !==
+                                  "tiktok"
                               ) {
                                 return null;
                               }
@@ -792,16 +799,22 @@ const right =
                                   }}
                                   aria-label={`Open ${artist.artistName} work`}
                                 >
-                                  <img
-                                    src={
-                                      thumbnail
-                                    }
-                                    alt=""
-                                    draggable={
-                                      false
-                                    }
-                                    className="h-full w-full object-cover"
-                                  />
+                                  {thumbnail ? (
+                                    <img
+                                      src={
+                                        thumbnail
+                                      }
+                                      alt=""
+                                      draggable={
+                                        false
+                                      }
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center bg-zinc-900 text-[10px] font-semibold text-white/50">
+                                      TikTok
+                                    </div>
+                                  )}
                                 </button>
                               );
                             },

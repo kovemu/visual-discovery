@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import RemoveAllPicksDialog from "@/components/me/RemoveAllPicksDialog";
+import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
 import { createClient } from "@/lib/supabase/client";
 
 type PickWork = {
@@ -19,7 +20,7 @@ type PickWork = {
   artistId: string;
   artistName: string;
   category: string;
-  type: "image" | "youtube";
+  type: "image" | "youtube" | "tiktok";
   image?: string;
   videoId?: string;
   caption: string | null;
@@ -187,19 +188,28 @@ function mapPickedWork(
   const isYoutube =
     work.source === "youtube" &&
     Boolean(work.source_id);
+  const isTikTok =
+    work.source === "tiktok" &&
+    Boolean(work.source_id);
 
   return {
     id: String(work.id),
     artistId: artist.id,
     artistName: artist.name,
     category: artist.category,
-    type: isYoutube ? "youtube" : "image",
-    videoId: isYoutube
+    type: isYoutube
+      ? "youtube"
+      : isTikTok
+        ? "tiktok"
+        : "image",
+    videoId: isYoutube || isTikTok
       ? work.source_id ?? undefined
       : undefined,
     image:
       work.thumbnail_url ??
-      (isYoutube ? undefined : work.source_url),
+      (isYoutube || isTikTok
+        ? undefined
+        : work.source_url),
     caption:
       work.description ??
       work.title ??
@@ -812,16 +822,26 @@ export default function MyKovemuPicks() {
                   allowFullScreen
                   className="aspect-[9/16] max-h-[80vh] w-full"
                 />
-              ) : (
+              ) : selectedWork.type ===
+                  "tiktok" &&
+                selectedWork.videoId ? (
+                <TikTokPlayerEmbed
+                  videoId={
+                    selectedWork.videoId
+                  }
+                  title={`${selectedWork.artistName} TikTok`}
+                />
+              ) : selectedWork.image ? (
                 <img
                   src={
                     selectedWork.image
                   }
                   alt={`${selectedWork.artistName} work`}
                   draggable={false}
+                  referrerPolicy="no-referrer"
                   className="max-h-[80vh] w-full object-contain"
                 />
-              )}
+              ) : null}
             </div>
 
             <aside className="relative w-[300px] shrink-0 bg-white p-6">

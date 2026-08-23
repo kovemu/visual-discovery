@@ -19,6 +19,8 @@ import YouTubePreviewModal, {
   YouTubePreviewThumbnail,
   extractYouTubeVideoId,
 } from "@/components/admin/YouTubePreviewModal";
+import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
+import TikTokThumbnail from "@/components/works/TikTokThumbnail";
 
 const TAG_OPTIONS = [
   "K-pop",
@@ -92,7 +94,7 @@ function getWorkYouTubePreviewUrl(
   return work.source_url;
 }
 
-function canPreviewWork(
+function canPreviewYouTubeWork(
   work: Work,
 ) {
   if (work.source !== "youtube") {
@@ -105,6 +107,15 @@ function canPreviewWork(
         work,
       ),
     ),
+  );
+}
+
+function canPreviewTikTokWork(
+  work: Work,
+) {
+  return (
+    work.source === "tiktok" &&
+    Boolean(work.source_id)
   );
 }
 
@@ -246,9 +257,10 @@ const [
     useState("");
 
   const [
-    previewVideo,
-    setPreviewVideo,
+    previewWork,
+    setPreviewWork,
   ] = useState<{
+    type: "youtube" | "tiktok";
     videoId: string;
     title: string;
   } | null>(null);
@@ -1495,9 +1507,12 @@ async function saveWorkEdit() {
                       key={work.id}
                       className="overflow-hidden rounded-xl border border-zinc-200"
                     >
-                      {work.thumbnail_url && (
+                      {(work.thumbnail_url ||
+                        canPreviewTikTokWork(
+                          work,
+                        )) && (
                         <div className="relative aspect-video overflow-hidden bg-zinc-100">
-                          {canPreviewWork(
+                          {canPreviewYouTubeWork(
                             work,
                           ) ? (
                             <YouTubePreviewThumbnail
@@ -1510,14 +1525,16 @@ async function saveWorkEdit() {
                                 "Work"
                               }
                               thumbnail={
-                                work.thumbnail_url
+                                work.thumbnail_url ??
+                                ""
                               }
                               onPreview={(
                                 videoId,
                                 title,
                               ) =>
-                                setPreviewVideo(
+                                setPreviewWork(
                                   {
+                                    type: "youtube",
                                     videoId,
                                     title,
                                   },
@@ -1525,7 +1542,45 @@ async function saveWorkEdit() {
                               }
                               className="h-full w-full"
                             />
-                          ) : (
+                          ) : canPreviewTikTokWork(
+                              work,
+                            ) ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewWork(
+                                  {
+                                    type: "tiktok",
+                                    videoId:
+                                      work.source_id!,
+                                    title:
+                                      work.title ||
+                                      work.description ||
+                                      "TikTok work",
+                                  },
+                                )
+                              }
+                              className="relative block h-full w-full cursor-pointer"
+                            >
+                              <TikTokThumbnail
+                                src={
+                                  work.thumbnail_url
+                                }
+                                alt={
+                                  work.title ||
+                                  "TikTok work"
+                                }
+                                className="h-full w-full object-cover"
+                                placeholderClassName="h-full w-full"
+                              />
+
+                              <div className="pointer-events-none absolute inset-0 bg-black/10" />
+
+                              <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white">
+                                ▶
+                              </div>
+                            </button>
+                          ) : work.thumbnail_url ? (
                             <img
                               src={
                                 work.thumbnail_url
@@ -1536,7 +1591,7 @@ async function saveWorkEdit() {
                               }
                               className="h-full w-full object-cover"
                             />
-                          )}
+                          ) : null}
 
                           <button
                             type="button"
@@ -1765,18 +1820,56 @@ async function saveWorkEdit() {
 )}
     </main>
 
-    {previewVideo && (
+    {previewWork?.type ===
+      "youtube" && (
       <YouTubePreviewModal
         videoId={
-          previewVideo.videoId
+          previewWork.videoId
         }
         title={
-          previewVideo.title
+          previewWork.title
         }
         onClose={() =>
-          setPreviewVideo(null)
+          setPreviewWork(null)
         }
       />
+    )}
+
+    {previewWork?.type ===
+      "tiktok" && (
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+        onClick={() =>
+          setPreviewWork(null)
+        }
+      >
+        <div
+          className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-2xl bg-black"
+          onClick={(event) =>
+            event.stopPropagation()
+          }
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setPreviewWork(null)
+            }
+            aria-label="Close TikTok preview"
+            className="absolute right-4 top-4 z-20 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-xl text-white"
+          >
+            ×
+          </button>
+
+          <TikTokPlayerEmbed
+            videoId={
+              previewWork.videoId
+            }
+            title={
+              previewWork.title
+            }
+          />
+        </div>
+      </div>
     )}
     </>
   );

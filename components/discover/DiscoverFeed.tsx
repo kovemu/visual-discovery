@@ -5,13 +5,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import AuthModal from "@/components/AuthModal";
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
+import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
 
 export type FeedItem = {
   id: string;
   artistId: string;
   artistName: string;
   category: string;
-  type?: "image" | "youtube";
+  type?: "image" | "youtube" | "tiktok";
   image?: string;
   videoId?: string;
   caption?: string | null;
@@ -305,6 +306,14 @@ function getWorkThumbnail(work: FeedItem) {
   }
 
   return "";
+}
+
+function isPlayableVideo(work: FeedItem) {
+  return (
+    (work.type === "youtube" ||
+      work.type === "tiktok") &&
+    Boolean(work.videoId)
+  );
 }
 
 function getVideoHeightPx(work: FeedItem) {
@@ -2238,6 +2247,10 @@ function openPickedWork(
                       Boolean(
                         work.videoId,
                       );
+                    const isPlayable =
+                      isPlayableVideo(
+                        work,
+                      );
 
                     const thumbnail =
                       getWorkThumbnail(
@@ -2312,12 +2325,18 @@ function openPickedWork(
                                   thumbnail
                                 }
                                 alt={
-                                  isYoutube
+                                  isPlayable
                                     ? `${work.artistName} video`
                                     : `${work.artistName} work`
                                 }
                                 draggable={
                                   false
+                                }
+                                referrerPolicy={
+                                  work.type ===
+                                  "tiktok"
+                                    ? "no-referrer"
+                                    : undefined
                                 }
                                 onLoad={(
                                   event,
@@ -2374,7 +2393,7 @@ function openPickedWork(
 
                             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-t from-black/75 via-black/25 to-transparent transition duration-300 group-hover:from-black/80" />
 
-                            {isYoutube && (
+                            {isPlayable && (
                               <div className="pointer-events-none absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/45 text-[11px] text-white/90 backdrop-blur-[2px] transition duration-300 group-hover:bg-black/65 group-hover:text-white">
                                 ▶
                               </div>
@@ -2468,6 +2487,12 @@ function openPickedWork(
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
                   className="aspect-[9/16] max-h-[80vh] w-full"
+                />
+              ) : selectedWork.type === "tiktok" &&
+                selectedWork.videoId ? (
+                <TikTokPlayerEmbed
+                  videoId={selectedWork.videoId}
+                  title={`${selectedWork.artistName} TikTok`}
                 />
               ) : (
                 <img

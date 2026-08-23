@@ -13,12 +13,17 @@ import { createClient } from "@/lib/supabase/client";
 import YouTubePreviewModal, {
   YouTubePreviewThumbnail,
 } from "@/components/admin/YouTubePreviewModal";
+import TikTokThumbnail from "@/components/works/TikTokThumbnail";
 import type {
   WorkAnalysis,
   WorkSourceTab,
 } from "@/lib/ai/analyzeWorks";
 import { ANALYZE_WORKS_BATCH_SIZE } from "@/lib/ai/analyzeWorks";
 import type { ResearchSource } from "@/lib/ai/generateArtistProfile";
+import {
+  buildCanonicalTikTokUrl,
+  extractTikTokVideoId,
+} from "@/lib/tiktok/extractTikTokVideoId";
 import { extractInstagramUrl } from "@/lib/youtube/extractInstagramUrl";
 
 type YouTubeVideo = {
@@ -34,6 +39,7 @@ type YouTubeVideo = {
   likeCount?: number;
   channelId?: string;
   channelTitle?: string;
+  source?: "youtube" | "tiktok";
 };
 
 type YouTubeChannel = {
@@ -450,6 +456,30 @@ export default function AdminImportPage() {
   const [
     loadingOlderFancams,
     setLoadingOlderFancams,
+  ] = useState(false);
+
+  const [
+    fancamSource,
+    setFancamSource,
+  ] = useState<"youtube" | "tiktok">(
+    "youtube",
+  );
+
+  const [
+    tiktokUrl,
+    setTiktokUrl,
+  ] = useState("");
+
+  const [
+    tiktokWorks,
+    setTiktokWorks,
+  ] = useState<YouTubeVideo[]>(
+    [],
+  );
+
+  const [
+    loadingTiktok,
+    setLoadingTiktok,
   ] = useState(false);
 
   const [
@@ -1318,6 +1348,133 @@ setShorts(
     }
   }
 
+  async function loadTikTok() {
+    const rawUrl = tiktokUrl.trim();
+    const canonicalUrl =
+      buildCanonicalTikTokUrl(rawUrl);
+    const videoId = extractTikTokVideoId(
+      canonicalUrl ?? rawUrl,
+    );
+
+    if (!videoId || !canonicalUrl) {
+      setError(
+        "올바른 TikTok 영상 URL을 입력해주세요. 예: https://www.tiktok.com/@username/video/1234567890123456789",
+      );
+      return;
+    }
+
+    if (
+      tiktokWorks.some(
+        (work) => work.id === videoId,
+      )
+    ) {
+      setError(
+        "이미 추가된 TikTok 영상입니다.",
+      );
+      return;
+    }
+
+    setLoadingTiktok(true);
+    setError("");
+    setMessage("");
+
+    try {
+      let title = `TikTok video ${videoId}`;
+      let thumbnail = "";
+      let authorName: string | undefined;
+      let description = "";
+      let sourceUrl = canonicalUrl;
+
+      const response = await fetch(
+        `/api/tiktok/oembed?url=${encodeURIComponent(canonicalUrl)}`,
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(
+          typeof data.error === "string"
+            ? data.error
+            : "TikTok metadata를 불러오지 못했습니다.",
+        );
+        return;
+      }
+
+      if (
+        data.oembedFailed === true &&
+        data.oembedStatus === 429
+      ) {
+        setError(
+          "TikTok rate limit. 약 30초 후 다시 시도하세요.",
+        );
+        return;
+      }
+
+      if (data.oembedFailed === true) {
+        setError(
+          "TikTok metadata를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+        );
+        return;
+      }
+
+      if (
+        typeof data.title === "string" &&
+        data.title.trim()
+      ) {
+        title = data.title.trim();
+        description = data.title.trim();
+      }
+
+      if (
+        typeof data.thumbnail_url ===
+          "string" &&
+        data.thumbnail_url.trim()
+      ) {
+        thumbnail = data.thumbnail_url.trim();
+      }
+
+      if (
+        typeof data.author_name ===
+          "string" &&
+        data.author_name.trim()
+      ) {
+        authorName = data.author_name.trim();
+      }
+
+      if (
+        typeof data.url === "string" &&
+        data.url.trim()
+      ) {
+        sourceUrl =
+          buildCanonicalTikTokUrl(
+            data.url.trim(),
+          ) ?? data.url.trim();
+      }
+
+      setTiktokWorks((current) => [
+        ...current,
+        {
+          id: videoId,
+          title,
+          description,
+          thumbnail,
+          publishedAt: new Date().toISOString(),
+          url: sourceUrl,
+          channelTitle: authorName,
+          source: "tiktok",
+        },
+      ]);
+      setActiveTab("fancams");
+      setTiktokUrl("");
+      setMessage("TikTok 영상을 불러왔습니다.");
+    } catch {
+      setError(
+        "TikTok metadata를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+      );
+    } finally {
+      setLoadingTiktok(false);
+    }
+  }
+
   /*
     Images
   */
@@ -2075,6 +2232,9 @@ function removeExternalImageDraft(
         featured: featuredVideoIds.has(
           video.id,
         ),
+        ...(video.source === "tiktok"
+          ? { source: "tiktok" as const }
+          : {}),
       }),
     );
   }
@@ -2635,17 +2795,23 @@ function removeExternalImageDraft(
       ],
     );
 
+  const showingTikTokCandidates =
+    activeTab === "fancams" &&
+    fancamSource === "tiktok";
+
   const displayedVideos =
     activeTab === "shorts"
       ? sortedShorts
       : activeTab === "videos"
         ? sortedVideos
-        : activeTab === "fancams"
-          ? sortedFancamWorks
-          : activeTab ===
-              "additional"
-            ? sortedAdditionalWorks
-            : [];
+        : showingTikTokCandidates
+          ? tiktokWorks
+          : activeTab === "fancams"
+            ? sortedFancamWorks
+            : activeTab ===
+                "additional"
+              ? sortedAdditionalWorks
+              : [];
 
   const allVideoWorks =
     Array.from(
@@ -2655,6 +2821,7 @@ function removeExternalImageDraft(
           ...videos,
           ...fancamWorks,
           ...additionalWorks,
+          ...tiktokWorks,
         ].map(
           (video) => [
             video.id,
@@ -2974,7 +3141,8 @@ if (
     Boolean(channel) ||
     fancamWorks.length > 0 ||
     additionalWorks.length >
-      0;
+      0 ||
+    tiktokWorks.length > 0;
 
   const hasAnyWorks =
   hasVideoWorks ||
@@ -3514,6 +3682,108 @@ if (
 
         <div className="mt-5 space-y-4">
           <div>
+            <span className="mb-2 block text-sm font-medium text-zinc-700">
+              Source
+            </span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {(
+                [
+                  ["youtube", "YouTube"],
+                  ["tiktok", "TikTok"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() =>
+                    setFancamSource(value)
+                  }
+                  aria-pressed={
+                    fancamSource === value
+                  }
+                  className={`rounded-lg px-3 py-1.5 text-sm ${
+                    fancamSource === value
+                      ? "bg-zinc-950 text-white"
+                      : "border border-zinc-200 text-zinc-600"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {fancamSource === "tiktok" ? (
+            <>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-zinc-700">
+                  Artist
+                </label>
+
+                <select
+                  value={selectedArtistId}
+                  onChange={(event) =>
+                    setSelectedArtistId(
+                      event.target.value,
+                    )
+                  }
+                  className="h-12 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+                >
+                  <option value="">
+                    Select artist
+                  </option>
+
+                  {artists.map((artist) => (
+                    <option
+                      key={artist.id}
+                      value={artist.id}
+                    >
+                      {artist.name}
+                      {artist.username
+                        ? ` (@${artist.username})`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-zinc-700">
+                  TikTok Video URL
+                </label>
+
+                <input
+                  value={tiktokUrl}
+                  onChange={(event) =>
+                    setTiktokUrl(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="https://www.tiktok.com/@username/video/1234567890123456789"
+                  className="h-12 w-full rounded-xl border border-zinc-200 px-4 text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={loadTikTok}
+                  disabled={
+                    loadingTiktok ||
+                    !tiktokUrl.trim()
+                  }
+                  className="h-12 rounded-xl bg-zinc-950 px-6 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  {loadingTiktok
+                    ? "Loading..."
+                    : "Load TikTok"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+          <div>
             <label className="mb-2 block text-sm font-medium text-zinc-700">
               Artist
             </label>
@@ -3617,6 +3887,8 @@ if (
                 : "Search Fancams"}
             </button>
           </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -3828,7 +4100,9 @@ if (
                 ],
                 [
                   "fancams",
-                  `Fancams (${fancamWorks.length})`,
+                  tiktokWorks.length > 0
+                    ? `Fancams (${fancamWorks.length}) · TikTok (${tiktokWorks.length})`
+                    : `Fancams (${fancamWorks.length})`,
                 ],
                 [
                   "additional",
@@ -4159,12 +4433,15 @@ if (
                       : activeTab ===
                           "videos"
                         ? `Videos (${videos.length})`
-                        : activeTab ===
-                            "fancams"
-                          ? `Fancams (${fancamWorks.length})`
-                          : `Additional (${additionalWorks.length})`}
+                        : showingTikTokCandidates
+                          ? `TikTok (${tiktokWorks.length})`
+                          : activeTab ===
+                              "fancams"
+                            ? `Fancams (${fancamWorks.length})`
+                            : `Additional (${additionalWorks.length})`}
                   </p>
 
+                  {!showingTikTokCandidates && (
                   <div className="flex flex-wrap items-center gap-2">
                     {aiAssistEnabled && (
                       <button
@@ -4234,6 +4511,7 @@ if (
                       ),
                     )}
                   </div>
+                  )}
                 </div>
               )}
 
@@ -4252,6 +4530,9 @@ if (
                     workAnalyses[
                       video.id
                     ];
+                  const isTikTok =
+                    video.source ===
+                    "tiktok";
 
                   return (
                     <article
@@ -4270,6 +4551,14 @@ if (
                       }`}
                     >
                       <div className="relative aspect-video">
+  {isTikTok ? (
+    <TikTokThumbnail
+      src={video.thumbnail}
+      alt={video.title}
+      className="h-full w-full object-cover"
+      placeholderClassName="h-full w-full"
+    />
+  ) : (
   <YouTubePreviewThumbnail
     url={video.url}
     title={video.title}
@@ -4285,6 +4574,13 @@ if (
     }
     className="h-full w-full"
   />
+  )}
+
+  {isTikTok && (
+    <span className="absolute right-3 top-3 z-10 rounded-full bg-black/75 px-2.5 py-1 text-[11px] font-semibold text-white">
+      TikTok
+    </span>
+  )}
 
   <div className="absolute left-3 top-3 z-10">
     <button
@@ -4346,7 +4642,8 @@ if (
                           }
                         </h3>
 
-                        {analysis && (
+                        {analysis &&
+                          !isTikTok && (
                           <WorkAnalysisBadges
                             analysis={
                               analysis
@@ -4354,7 +4651,22 @@ if (
                           />
                         )}
 
-                        {video.publishedAt && (
+                        {isTikTok &&
+                          video.channelTitle && (
+                          <p className="mt-1 text-xs text-zinc-400">
+                            {video.channelTitle}
+                          </p>
+                        )}
+
+                        {isTikTok &&
+                          video.url && (
+                          <p className="mt-1 truncate text-xs text-zinc-400">
+                            {video.url}
+                          </p>
+                        )}
+
+                        {!isTikTok &&
+                          video.publishedAt && (
                           <p className="mt-1 text-xs text-zinc-400">
                             {formatPublishedDate(
                               video.publishedAt,
@@ -4362,7 +4674,8 @@ if (
                           </p>
                         )}
 
-                        {(video.viewCount !=
+                        {!isTikTok &&
+                          (video.viewCount !=
                           null ||
                           video.likeCount !=
                             null ||
@@ -4440,6 +4753,8 @@ if (
 
             {activeTab ===
               "fancams" &&
+              fancamSource ===
+                "youtube" &&
               fancamNextPageToken && (
                 <div className="mt-6 flex justify-center">
                   <button

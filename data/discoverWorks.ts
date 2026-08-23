@@ -3,7 +3,7 @@ export type DemoWork = {
   artistId: string;
   artistName: string;
   category: string;
-  type: "image" | "youtube";
+  type: "image" | "youtube" | "tiktok";
   image?: string;
   videoId?: string;
   caption: string | null;

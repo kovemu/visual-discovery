@@ -292,18 +292,22 @@ export default async function CreatorPage({
       type:
         work.source === "youtube"
           ? "youtube"
-          : "image",
+          : work.source === "tiktok"
+            ? "tiktok"
+            : "image",
 
       videoId:
-        work.source === "youtube"
+        work.source === "youtube" ||
+        work.source === "tiktok"
           ? work.source_id ?? undefined
           : undefined,
 
       image:
         work.thumbnail_url ??
-        (work.source !== "youtube"
-          ? work.source_url
-          : undefined),
+        (work.source === "youtube" ||
+        work.source === "tiktok"
+          ? undefined
+          : work.source_url),
 
       caption:
         work.description ??

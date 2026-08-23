@@ -12,9 +12,12 @@ import {
   useState,
 } from "react";
 
+import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
+import TikTokThumbnail from "@/components/works/TikTokThumbnail";
+
 type LatestWork = {
   id: string;
-  type: "image" | "youtube";
+  type: "image" | "youtube" | "tiktok";
   image?: string;
   videoId?: string;
   caption: string | null;
@@ -188,14 +191,36 @@ export default function LatestWorksCarousel({
                     ▶
                   </div>
                 </div>
+              ) : work.type === "tiktok" &&
+                work.videoId ? (
+                <div className="relative aspect-[9/16] overflow-hidden bg-black">
+                  <TikTokThumbnail
+                    src={work.image}
+                    alt={`${artistName} latest work`}
+                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    placeholderClassName="h-full w-full"
+                  />
+
+                  <div className="absolute inset-0 bg-black/10 transition group-hover:bg-black/20" />
+
+                  <div className="absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white">
+                    ▶
+                  </div>
+                </div>
               ) : work.image ? (
-                <img
+                <TikTokThumbnail
                   src={work.image}
                   alt={`${artistName} latest work`}
-                  draggable={false}
                   className="aspect-[9/16] w-full object-cover transition duration-300 group-hover:scale-105"
+                  placeholderClassName="aspect-[9/16] w-full"
                 />
-              ) : null}
+              ) : (
+                <TikTokThumbnail
+                  src={null}
+                  alt={`${artistName} latest work`}
+                  placeholderClassName="aspect-[9/16] w-full"
+                />
+              )}
 
               {work.caption && (
                 <div className="p-3">
@@ -272,6 +297,15 @@ export default function LatestWorksCarousel({
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
                 className="aspect-[9/16] h-[80vh] max-h-[760px]"
+              />
+            ) : selectedWork.type ===
+                "tiktok" &&
+              selectedWork.videoId ? (
+              <TikTokPlayerEmbed
+                videoId={
+                  selectedWork.videoId
+                }
+                title={`${artistName} video`}
               />
             ) : selectedWork.image ? (
               <img

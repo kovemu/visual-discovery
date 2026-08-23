@@ -119,6 +119,36 @@ function mapWork(
     };
   }
 
+  if (
+    work.source === "tiktok" &&
+    work.source_id
+  ) {
+    return {
+      id: String(work.id),
+
+      artistId: artist.id,
+      artistName: artist.name,
+
+      category,
+
+      type: "tiktok",
+
+      videoId: work.source_id,
+
+      image:
+        work.thumbnail_url ?? undefined,
+
+      caption:
+        work.description ??
+        work.title ??
+        null,
+
+      sourceUrl: work.source_url,
+
+      artistUrl: `/creator/${artist.id}`,
+    };
+  }
+
   return {
     id: String(work.id),
 
