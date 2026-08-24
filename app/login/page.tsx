@@ -3,6 +3,19 @@ import type { ReactNode } from "react";
 
 import LoginForm from "@/components/LoginForm";
 
+function getSafeNextPath(value: string | undefined) {
+  if (
+    !value ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("://")
+  ) {
+    return undefined;
+  }
+
+  return value;
+}
+
 function AuthShell({
   children,
 }: {
@@ -33,6 +46,7 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{
     created?: string;
+    next?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -45,6 +59,7 @@ export default async function LoginPage({
         accountCreated={
           params.created === "1"
         }
+        nextPath={getSafeNextPath(params.next)}
       />
     </AuthShell>
   );

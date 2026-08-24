@@ -4,6 +4,8 @@ import {
 
 import OpenAI from "openai";
 
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+
 const OPENAI_MODEL =
   "gpt-4o-mini";
 
@@ -55,6 +57,12 @@ function sanitizeErrorMessage(
 }
 
 export async function POST() {
+  const auth = await requireAdmin();
+
+  if (!auth.ok) {
+    return adminAuthErrorResponse(auth);
+  }
+
   const apiKey =
     process.env.OPENAI_API_KEY;
 

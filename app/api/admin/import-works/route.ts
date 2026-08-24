@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
 import { buildCanonicalTikTokUrl } from "@/lib/tiktok/extractTikTokVideoId";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -23,6 +24,12 @@ function resolveWorkSource(source: unknown) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin();
+
+  if (!auth.ok) {
+    return adminAuthErrorResponse(auth);
+  }
+
   try {
     if (!supabaseUrl || !serviceRoleKey) {
       return NextResponse.json(

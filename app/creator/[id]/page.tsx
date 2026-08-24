@@ -5,19 +5,14 @@ import ArtistVote from "@/components/artist/ArtistVote";
 import ProfileMyPicks from "@/components/artist/ProfileMyPicks";
 
 import {
-  allCreators,
-  getCreatorById,
-  type Creator,
-} from "@/data/creators";
-import {
   ExternalLink,
   Camera,
   Play,
 } from "lucide-react";
 
-import { categoryCreators } from "@/data/categoryCreators";
 import type { DemoWork } from "@/data/discoverWorks";
 import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/validation/isUuid";
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -57,27 +52,6 @@ type PlatformItem =
 
 
 
-/*
-  기존 Demo Artist 데이터 통합
-*/
-const demoCreators: Creator[] = Array.from(
-  new Map(
-    [...categoryCreators, ...allCreators].map((creator) => [
-      creator.id,
-      creator,
-    ]),
-  ).values(),
-);
-
-function getDemoCreatorById(id: string) {
-  return (
-    categoryCreators.find((creator) => creator.id === id) ??
-    getCreatorById(id)
-  );
-}
-
-
-
 function getPlatformName(platform: PlatformItem) {
   if (typeof platform === "string") {
     return platform;
@@ -102,16 +76,14 @@ function getPlatformUrl(platform: PlatformItem) {
 }
 
 
-export async function generateStaticParams() {
-  return demoCreators.map((creator) => ({
-    id: creator.id,
-  }));
-}
-
 export default async function CreatorPage({
   params,
 }: CreatorPageProps) {
   const { id } = await params;
+
+  if (!isUuid(id)) {
+    notFound();
+  }
 
   const supabase = await createClient();
 
@@ -150,94 +122,65 @@ export default async function CreatorPage({
     );
   }
 
-  /*
-    기존 Demo Artist 확인
-  */
-  const demoCreator = getDemoCreatorById(id);
-
-  if (!dbCreator && !demoCreator) {
+  if (!dbCreator) {
     notFound();
   }
 
-  /*
-    공통 Artist 데이터
-  */
-  const artistId =
-    dbCreator?.id ?? demoCreator!.id;
+  const artistId = dbCreator.id;
 
-  const artistName =
-    dbCreator?.name ?? demoCreator!.name;
+  const artistName = dbCreator.name;
 
-  const rawCategory =
-    dbCreator?.category ??
-    demoCreator!.category;
+  const rawCategory = dbCreator.category;
 
   const artistCategory =
     rawCategory.charAt(0).toUpperCase() +
     rawCategory.slice(1);
 
   const artistTagline =
-    dbCreator?.tagline ||
+    dbCreator.tagline ||
     "Discover this artist on Kovemu.";
   
     const artistDescription =
-    dbCreator?.bio ||
-    demoCreator?.description ||
+    dbCreator.bio ||
     "On Kovemu.";
 
  const heroImage =
-  dbCreator?.cover_image ||
-  demoCreator?.image ||
+  dbCreator.cover_image ||
   null;
 
   const profileImage =
-  dbCreator?.profile_image || null;
+  dbCreator.profile_image || null;
   
   const coverPositionX =
-  dbCreator?.cover_position_x ?? 50;
+  dbCreator.cover_position_x ?? 50;
 
   const coverPositionY =
-  dbCreator?.cover_position_y ?? 50;
+  dbCreator.cover_position_y ?? 50;
 
-  /*
-    DB tags 우선.
-    DB에 없으면 기존 demo tags,
-    그것도 없으면 category 하나.
-  */
   const tags =
-    dbCreator?.tags?.length
+    dbCreator.tags?.length
       ? dbCreator.tags
-      : demoCreator?.tags ?? [artistCategory];
+      : [artistCategory];
 
   /*
     Artist Links
 
-    DB에서 관리자가 저장한 링크를 우선 사용.
-    DB 링크가 하나도 없으면 기존 demo 링크 fallback.
+    DB에서 관리자가 저장한 링크를 사용.
   */
   const platforms: PlatformItem[] = [];
 
-  if (dbCreator?.youtube_url) {
+  if (dbCreator.youtube_url) {
     platforms.push({
       name: "YouTube",
       url: dbCreator.youtube_url,
     });
   }
 
-  if (dbCreator?.instagram_url) {
+  if (dbCreator.instagram_url) {
     platforms.push({
       name: "Instagram",
       url: dbCreator.instagram_url,
     });
-  }
-
-  if (
-    platforms.length === 0 &&
-    demoCreator?.platformLinks
-  ) {
-    platforms.push(
-      ...demoCreator.platformLinks,
-    );
   }
 
   /*
@@ -426,7 +369,7 @@ export default async function CreatorPage({
     Curated 여부는 이제 DB의 is_curated 기준.
   */
   const isCurated =
-    dbCreator?.is_curated ?? true;
+    dbCreator.is_curated ?? true;
 
   return (
     <>
@@ -476,7 +419,7 @@ export default async function CreatorPage({
       {artistName}
     </h1>
 
-    {dbCreator?.username && (
+                {dbCreator.username && (
       <p className="mt-2 text-sm font-semibold text-white/60">
         @{dbCreator.username}
       </p>

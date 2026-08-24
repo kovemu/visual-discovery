@@ -5,6 +5,8 @@ import {
 
 import { createClient } from "@supabase/supabase-js";
 
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL;
 
@@ -21,6 +23,12 @@ type ImageMetadata = {
 export async function POST(
   request: NextRequest,
 ) {
+  const auth = await requireAdmin();
+
+  if (!auth.ok) {
+    return adminAuthErrorResponse(auth);
+  }
+
   try {
     if (
       !supabaseUrl ||

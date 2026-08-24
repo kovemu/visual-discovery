@@ -10,12 +10,20 @@ import {
   sanitizeAiErrorMessage,
 } from "@/lib/ai/generateArtistProfile";
 
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+
 const USER_FACING_ERROR =
   "AI profile generation failed. Please try again.";
 
 export async function POST(
   request: NextRequest,
 ) {
+  const auth = await requireAdmin();
+
+  if (!auth.ok) {
+    return adminAuthErrorResponse(auth);
+  }
+
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       {

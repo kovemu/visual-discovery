@@ -445,13 +445,6 @@ export default function ProfileEditor({
         >
           Edit Profile
         </button>
-
-        <Link
-          href="/account/upload"
-          className="inline-flex rounded-full bg-fuchsia-600 px-6 py-3 font-bold text-white transition hover:bg-fuchsia-700"
-        >
-          Upload Work
-        </Link>
       </div>
     </section>
   );

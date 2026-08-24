@@ -14,6 +14,7 @@ type LoginFormProps = {
   mode?: "login" | "signup";
   presentation?: "page" | "modal";
   accountCreated?: boolean;
+  nextPath?: string;
   onModeChange?: (
     mode: "login" | "signup",
   ) => void;
@@ -109,6 +110,7 @@ export default function LoginForm({
   mode = "login",
   presentation,
   accountCreated = false,
+  nextPath,
   onModeChange,
 }: LoginFormProps) {
   const supabase = createClient();
@@ -246,7 +248,7 @@ export default function LoginForm({
     if (onSuccess) {
       onSuccess();
     } else {
-      router.push("/");
+      router.push(nextPath || "/");
       router.refresh();
     }
   };
