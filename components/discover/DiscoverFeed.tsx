@@ -1048,6 +1048,8 @@ const [
     >({});
   const applyingSetRef =
     useRef(false);
+  const filterChangeInFlightRef =
+    useRef(false);
   const feedTopRef = useRef<HTMLDivElement | null>(null);
   const masonryRef = useRef<HTMLDivElement | null>(null);
 
@@ -1458,13 +1460,6 @@ const [
     return nextSet;
   }
 
-  function resetCandidatePaginationState() {
-    exhaustedSignaturesRef.current =
-      new Set();
-    workPageCycleRef.current = {};
-    refillPromisesRef.current = {};
-  }
-
   function ensureCandidateRoundForTypes(
     types: DiscoverType[],
   ) {
@@ -1716,39 +1711,61 @@ const [
   async function applyTypeFilterChange(
     nextTypes: DiscoverType[],
   ) {
-    const normalized =
-      normalizeActiveTypes(
-        nextTypes,
+    if (filterChangeInFlightRef.current) {
+      return;
+    }
+
+    filterChangeInFlightRef.current =
+      true;
+
+    try {
+      const normalized =
+        normalizeActiveTypes(
+          nextTypes,
+        );
+      const signature =
+        getTypesSignature(
+          normalized,
+        );
+      const isNewSignature =
+        candidateRoundsRef.current[
+          signature
+        ] === undefined;
+
+      activeTypesRef.current =
+        normalized;
+      setActiveTypes(normalized);
+      saveDiscoverTypes(normalized);
+
+      if (isNewSignature) {
+        candidateRoundsRef.current[
+          signature
+        ] = 1;
+
+        await bootstrapInitialSeededCandidates(
+          normalized,
+        );
+      }
+
+      setCandidateWorks(
+        candidateWorksRef.current,
       );
 
-    resetCandidatePaginationState();
-    ensureCandidateRoundForTypes(
-      normalized,
-    );
-
-    activeTypesRef.current =
-      normalized;
-    setActiveTypes(normalized);
-    saveDiscoverTypes(normalized);
-
-    await bootstrapInitialSeededCandidates(
-      normalized,
-    );
-
-    setCandidateWorks(
-      candidateWorksRef.current,
-    );
-
-    await applyNewSet(
-      normalized,
-      false,
-    );
+      await applyNewSet(
+        normalized,
+        false,
+      );
+    } finally {
+      filterChangeInFlightRef.current =
+        false;
+    }
   }
 
   function handleAllClick() {
     if (
       transitionStage !== "idle" ||
-      applyingSetRef.current
+      applyingSetRef.current ||
+      filterChangeInFlightRef.current
     ) {
       return;
     }
@@ -1767,7 +1784,8 @@ const [
   ) {
     if (
       transitionStage !== "idle" ||
-      applyingSetRef.current
+      applyingSetRef.current ||
+      filterChangeInFlightRef.current
     ) {
       return;
     }
