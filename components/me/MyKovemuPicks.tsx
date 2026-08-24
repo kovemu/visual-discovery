@@ -304,7 +304,7 @@ function PickWorkCard({
     <button
       type="button"
       onClick={onClick}
-      className="group w-[176px] shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-white text-left"
+      className="group w-full overflow-hidden rounded-xl border border-gray-200 bg-white text-left md:rounded-2xl"
     >
       {work.type === "youtube" &&
       work.videoId ? (
@@ -318,10 +318,14 @@ function PickWorkCard({
 
           <div className="absolute inset-0 bg-black/10 transition group-hover:bg-black/20" />
 
-          <div className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white">
+          <div className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white md:right-2 md:top-2 md:h-7 md:w-7">
+            <Play
+              size={10}
+              className="fill-white md:hidden"
+            />
             <Play
               size={12}
-              className="fill-white"
+              className="hidden fill-white md:block"
             />
           </div>
         </div>
@@ -337,8 +341,8 @@ function PickWorkCard({
       )}
 
       {work.caption && (
-        <div className="p-3">
-          <p className="line-clamp-2 text-sm text-gray-600">
+        <div className="p-1.5 md:p-3">
+          <p className="line-clamp-1 break-words text-[10px] leading-4 text-gray-600 md:line-clamp-2 md:text-sm md:leading-normal">
             {work.caption}
           </p>
         </div>
@@ -776,7 +780,7 @@ export default function MyKovemuPicks() {
   </div>
 </div>
 
-                <div className="mt-5 flex flex-wrap gap-4">
+                <div className="mt-5 grid w-full grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                   {group.works.map(
                     (work) => (
                       <PickWorkCard

@@ -71,6 +71,10 @@ type MyPicksPanelProps = {
   onWorkClick: (
     work: PickPanelWork,
   ) => void;
+  mobileOpen?: boolean;
+  onMobileOpenChange?: (
+    open: boolean,
+  ) => void;
 };
 
 function mapPickedWork(
@@ -161,6 +165,8 @@ export default function MyPicksPanel({
   works,
   refreshKey,
   onWorkClick,
+  mobileOpen = false,
+  onMobileOpenChange,
 }: MyPicksPanelProps) {
   const router = useRouter();
   const supabase = useMemo(
@@ -559,6 +565,226 @@ function changeFilter(
     setShowAuthModal(true);
   }
 
+  const picksPanelContent = (
+    <>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-black text-gray-950">
+          My Picks
+        </h2>
+
+        <button
+          type="button"
+          onClick={handleViewAllClick}
+          className="text-xs font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+        >
+          View all →
+        </button>
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 text-xs font-semibold">
+        <button
+          type="button"
+          onClick={() =>
+            changeFilter(
+              "today",
+            )
+          }
+          className={
+            filter ===
+            "today"
+              ? "text-fuchsia-600"
+              : "text-gray-500 transition hover:text-gray-900"
+          }
+        >
+          Today
+        </button>
+
+        <span className="text-gray-300">
+          |
+        </span>
+
+        <button
+          type="button"
+          onClick={() =>
+            changeFilter(
+              "all",
+            )
+          }
+          className={
+            filter ===
+            "all"
+              ? "text-fuchsia-600"
+              : "text-gray-500 transition hover:text-gray-900"
+          }
+        >
+          All
+        </button>
+      </div>
+
+      <div className="mt-8 space-y-10">
+        {loading ? (
+          <p className="text-xs text-gray-400">
+            Loading...
+          </p>
+        ) : pickedArtists.length ===
+          0 ? (
+          <p className="text-sm leading-6 text-gray-400">
+            {filter ===
+            "today"
+              ? "No Picks today."
+              : "No Picks yet."}
+          </p>
+        ) : (
+          pickedArtists.map(
+            (artist) => {
+              const visibleWorks =
+                artist.works.slice(
+                  0,
+                  5,
+                );
+
+              const hiddenCount =
+                Math.max(
+                  0,
+                  artist.count -
+                    visibleWorks.length,
+                );
+
+              const expanded =
+                hoveredArtistId ===
+                artist.artistId;
+
+              return (
+                <div
+                  key={
+                    artist.artistId
+                  }
+                  onMouseEnter={() =>
+                    setHoveredArtistId(
+                      artist.artistId,
+                    )
+                  }
+                  onMouseLeave={() =>
+                    setHoveredArtistId(
+                      null,
+                    )
+                  }
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <Link
+                      href={`/creator/${artist.artistId}`}
+                      className="min-w-0 truncate text-sm font-bold text-gray-950 transition hover:text-fuchsia-600"
+                    >
+                      {
+                        artist.artistName
+                      }
+                    </Link>
+
+                    <span className="shrink-0 text-[11px] font-semibold text-gray-400">
+                      {
+                        artist.count
+                      }{" "}
+                      {artist.count ===
+                      1
+                        ? "Pick"
+                        : "Picks"}
+                    </span>
+                  </div>
+
+                  <div className="relative mt-3 h-[126px]">
+                    {visibleWorks.map(
+                      (
+                        work,
+                        index,
+                      ) => {
+                        const thumbnail =
+                          getThumbnail(
+                            work,
+                          );
+
+                        if (
+                          !thumbnail &&
+                          work.type !==
+                            "tiktok"
+                        ) {
+                          return null;
+                        }
+
+                        const gap =
+                          expanded ? 36 : 21;
+
+                        const right =
+                          hiddenCount > 0
+                            ? (visibleWorks.length - index) * gap
+                            : (visibleWorks.length - 1 - index) * gap;
+
+                        return (
+                          <button
+                            key={
+                              work.id
+                            }
+                            type="button"
+                            onClick={() =>
+                              onWorkClick(
+                                work,
+                              )
+                            }
+                            className="absolute top-0 h-[120px] w-[86px] overflow-hidden rounded-xl border-2 border-white bg-gray-100 shadow-md transition-all duration-300 ease-out hover:-translate-y-2"
+                            style={{
+                              right: `${right}px`,
+                              zIndex:
+                                visibleWorks.length -
+                                index +
+                                2,
+                            }}
+                            aria-label={`Open ${artist.artistName} work`}
+                          >
+                            {thumbnail ? (
+                              <img
+                                src={
+                                  thumbnail
+                                }
+                                alt=""
+                                draggable={
+                                  false
+                                }
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center bg-zinc-900 text-[10px] font-semibold text-white/50">
+                                TikTok
+                              </div>
+                            )}
+                          </button>
+                        );
+                      },
+                    )}
+
+                    {hiddenCount >
+                      0 && (
+                      <div
+                        className="absolute top-0 flex h-[120px] w-[86px] items-center justify-end rounded-xl border-2 border-white bg-gray-950 pr-3 text-base font-black text-white shadow-md transition-all duration-300"
+                        style={{
+                          right: "0px",
+                          zIndex: 1,
+                        }}
+                      >
+                        +
+                        {
+                          hiddenCount
+                        }
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            },
+          )
+        )}
+      </div>
+    </>
+  );
+
   return (
     <>
     <div
@@ -645,241 +871,52 @@ function changeFilter(
       : "pointer-events-none opacity-0"
   }`}
 >
-<div className="flex items-center justify-between">
-  <h2 className="text-lg font-black text-gray-950">
-    My Picks
-  </h2>
-
-  <button
-    type="button"
-    onClick={handleViewAllClick}
-    className="text-xs font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
-  >
-    View all →
-  </button>
+  {picksPanelContent}
 </div>
-
-            {/* Filter */}
-            <div className="mt-4 flex items-center gap-3 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() =>
-                  changeFilter(
-                    "today",
-                  )
-                }
-                className={
-                  filter ===
-                  "today"
-                    ? "text-fuchsia-600"
-                    : "text-gray-500 transition hover:text-gray-900"
-                }
-              >
-                Today
-              </button>
-
-              <span className="text-gray-300">
-                |
-              </span>
-
-              <button
-                type="button"
-                onClick={() =>
-                  changeFilter(
-                    "all",
-                  )
-                }
-                className={
-                  filter ===
-                  "all"
-                    ? "text-fuchsia-600"
-                    : "text-gray-500 transition hover:text-gray-900"
-                }
-              >
-                All
-              </button>
-            </div>
-
-            {/* Artist List */}
-            <div className="mt-8 space-y-10">
-              {loading ? (
-                <p className="text-xs text-gray-400">
-                  Loading...
-                </p>
-              ) : pickedArtists.length ===
-                0 ? (
-                <p className="text-sm leading-6 text-gray-400">
-                  {filter ===
-                  "today"
-                    ? "No Picks today."
-                    : "No Picks yet."}
-                </p>
-              ) : (
-                pickedArtists.map(
-                  (artist) => {
-                    /*
-                      Artist당 최대 5개
-                    */
-                    const visibleWorks =
-                      artist.works.slice(
-                        0,
-                        5,
-                      );
-
-                    const hiddenCount =
-                      Math.max(
-                        0,
-                        artist.count -
-                          visibleWorks.length,
-                      );
-
-                    const expanded =
-                      hoveredArtistId ===
-                      artist.artistId;
-
-                    return (
-                      <div
-                        key={
-                          artist.artistId
-                        }
-                        onMouseEnter={() =>
-                          setHoveredArtistId(
-                            artist.artistId,
-                          )
-                        }
-                        onMouseLeave={() =>
-                          setHoveredArtistId(
-                            null,
-                          )
-                        }
-                      >
-                        {/* Artist header */}
-                        <div className="flex items-center justify-between gap-3">
-                          <Link
-                            href={`/creator/${artist.artistId}`}
-                            className="min-w-0 truncate text-sm font-bold text-gray-950 transition hover:text-fuchsia-600"
-                          >
-                            {
-                              artist.artistName
-                            }
-                          </Link>
-
-                          <span className="shrink-0 text-[11px] font-semibold text-gray-400">
-                            {
-                              artist.count
-                            }{" "}
-                            {artist.count ===
-                            1
-                              ? "Pick"
-                              : "Picks"}
-                          </span>
-                        </div>
-
-                        {/* Work Stack */}
-                        <div className="relative mt-3 h-[126px]">
-                          {visibleWorks.map(
-                            (
-                              work,
-                              index,
-                            ) => {
-                              const thumbnail =
-                                getThumbnail(
-                                  work,
-                                );
-
-                              if (
-                                !thumbnail &&
-                                work.type !==
-                                  "tiktok"
-                              ) {
-                                return null;
-                              }
-
-                              /*
-                                평소 21px 간격.
-                                Hover 시 36px 간격.
-
-                                첫 카드가 최상단.
-                                오른쪽 카드일수록 아래에 깔림.
-                              */
-                              const gap =
-  expanded ? 36 : 21;
-
-const right =
-  hiddenCount > 0
-    ? (visibleWorks.length - index) * gap
-    : (visibleWorks.length - 1 - index) * gap;
-
-                              return (
-                                <button
-                                  key={
-                                    work.id
-                                  }
-                                  type="button"
-                                  onClick={() =>
-                                    onWorkClick(
-                                      work,
-                                    )
-                                  }
-                                  className="absolute top-0 h-[120px] w-[86px] overflow-hidden rounded-xl border-2 border-white bg-gray-100 shadow-md transition-all duration-300 ease-out hover:-translate-y-2"
-                                  style={{
-                                    right: `${right}px`,
-
-                                    zIndex:
-                                      visibleWorks.length -
-                                      index +
-                                      2,
-                                  }}
-                                  aria-label={`Open ${artist.artistName} work`}
-                                >
-                                  {thumbnail ? (
-                                    <img
-                                      src={
-                                        thumbnail
-                                      }
-                                      alt=""
-                                      draggable={
-                                        false
-                                      }
-                                      className="h-full w-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="flex h-full w-full items-center justify-center bg-zinc-900 text-[10px] font-semibold text-white/50">
-                                      TikTok
-                                    </div>
-                                  )}
-                                </button>
-                              );
-                            },
-                          )}
-
-                          {/* +N */}
-                          {hiddenCount >
-                            0 && (
-                            <div
-                              className="absolute top-0 flex h-[120px] w-[86px] items-center justify-end rounded-xl border-2 border-white bg-gray-950 pr-3 text-base font-black text-white shadow-md transition-all duration-300"
-                              style={{
-  right: "0px",
-  zIndex: 1,
-}}
-                            >
-                              +
-                              {
-                                hiddenCount
-                              }
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  },
-                )
-              )}
-            </div>
-          </div>
         
       </div>
     </div>
+
+    {onMobileOpenChange && (
+      <>
+        <div
+          className={`fixed inset-0 z-[55] bg-black/25 transition-opacity duration-300 xl:hidden ${
+            mobileOpen
+              ? "opacity-100"
+              : "pointer-events-none opacity-0"
+          }`}
+          onClick={() =>
+            onMobileOpenChange(false)
+          }
+          aria-hidden={!mobileOpen}
+        />
+
+        <div
+          className={`fixed inset-y-0 right-0 z-[56] w-[88vw] max-w-[380px] border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(0,0,0,0.08)] transition-transform duration-300 xl:hidden ${
+            mobileOpen
+              ? "translate-x-0"
+              : "pointer-events-none translate-x-full"
+          }`}
+        >
+          <button
+            type="button"
+            aria-label="Close My Picks panel"
+            onClick={() =>
+              onMobileOpenChange(false)
+            }
+            className="absolute left-0 top-1/2 flex h-[46px] w-[30px] -translate-y-1/2 items-center justify-center rounded-l-lg border border-r-0 border-gray-200 bg-white text-gray-500 shadow-[-2px_0_8px_rgba(0,0,0,0.06)] hover:text-fuchsia-600"
+          >
+            <ChevronRight
+              size={16}
+            />
+          </button>
+
+          <div className="h-full overflow-x-hidden overflow-y-auto pb-10 pl-5 pr-5 pt-7">
+            {picksPanelContent}
+          </div>
+        </div>
+      </>
+    )}
 
     <AuthModal
       open={showAuthModal}

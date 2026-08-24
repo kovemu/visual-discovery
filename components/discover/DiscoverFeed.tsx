@@ -374,11 +374,31 @@ function getVideoHeightPx(work: FeedItem) {
   return VIDEO_HEIGHTS[hash % VIDEO_HEIGHTS.length];
 }
 
+function getResponsiveMasonryGap(width: number) {
+  if (width >= 640) {
+    return MASONRY_GAP;
+  }
+
+  return 10;
+}
+
 function getResponsiveColumnCount(width: number) {
   if (width >= 1024) return 4;
   if (width >= 768) return 3;
-  if (width >= 640) return 2;
-  return 1;
+  return 2;
+}
+
+function StackedCardsIcon() {
+  return (
+    <span
+      className="relative block h-[18px] w-[22px]"
+      aria-hidden="true"
+    >
+      <span className="absolute bottom-0 left-0 h-3 w-3.5 rounded-[3px] border border-gray-300 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]" />
+      <span className="absolute bottom-[3px] left-[5px] h-3 w-3.5 rounded-[3px] border border-gray-300 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]" />
+      <span className="absolute bottom-[6px] left-[10px] h-3 w-3.5 rounded-[3px] border border-gray-400 bg-gray-50 shadow-[0_1px_3px_rgba(0,0,0,0.08)]" />
+    </span>
+  );
 }
 
 function estimateWorkHeight(
@@ -470,6 +490,7 @@ function buildBalancedLayout(
   columnCount: number,
   columnWidth: number,
   imageRatios: Record<string, number>,
+  masonryGap: number = MASONRY_GAP,
 ): BalancedLayout {
   const safeColumnCount =
     Math.max(
@@ -680,7 +701,7 @@ function buildBalancedLayout(
         ] +=
           item.height +
           (currentCount > 0
-            ? MASONRY_GAP
+            ? masonryGap
             : 0);
 
         nextCandidates.push(
@@ -773,7 +794,7 @@ function buildBalancedLayout(
         shortestIndex
       ] +=
         item.height +
-        MASONRY_GAP;
+        masonryGap;
     }
 
     return {
@@ -979,6 +1000,14 @@ const [
   pickPanelRefreshKey,
   setPickPanelRefreshKey,
 ] = useState(0);
+const [
+  mobilePicksOpen,
+  setMobilePicksOpen,
+] = useState(false);
+const [
+  mobilePickPlusOneKey,
+  setMobilePickPlusOneKey,
+] = useState(0);
   const [pendingPickWork, setPendingPickWork] =
   useState<FeedItem | null>(null);
   const [showLogin, setShowLogin] =
@@ -1068,12 +1097,17 @@ const [
       masonryWidth,
     );
 
+  const masonryGap =
+    getResponsiveMasonryGap(
+      masonryWidth,
+    );
+
   const columnWidth =
     columnCount > 0 &&
     masonryWidth > 0
       ? (
           masonryWidth -
-          MASONRY_GAP *
+          masonryGap *
             (columnCount - 1)
         ) /
         columnCount
@@ -1087,12 +1121,14 @@ const [
           columnCount,
           columnWidth,
           imageRatios,
+          masonryGap,
         ),
       [
         displayWorks,
         columnCount,
         columnWidth,
         imageRatios,
+        masonryGap,
       ],
     );
 
@@ -2036,7 +2072,17 @@ const [
         return next;
       },
     );
+
+    return;
   }
+
+  setMobilePickPlusOneKey(
+    (current) => current + 1,
+  );
+
+  setPickPanelRefreshKey(
+    (current) => current + 1,
+  );
 }
 function closeWorkModal() {
   setSelectedWork(null);
@@ -2163,16 +2209,16 @@ function openPickedWork(
 
   return (
     <>
-      <nav className="border-b border-gray-100 bg-white py-4">
-        <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <span className="mr-3 shrink-0 border-b-2 border-fuchsia-600 pb-2 text-[15px] font-bold tracking-tight text-fuchsia-600">
+      <nav className="border-b border-gray-100 bg-white py-3 md:py-4">
+        <div className="flex items-center gap-1 overflow-visible md:gap-2 md:overflow-x-auto md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden">
+          <span className="mr-1.5 shrink-0 whitespace-nowrap border-b-2 border-fuchsia-600 pb-2 text-[12px] font-bold tracking-tight text-fuchsia-600 md:mr-3 md:text-[15px]">
             DISCOVER
           </span>
 
           <button
             type="button"
             onClick={handleAllClick}
-            className={`relative shrink-0 rounded-full border inline-flex h-7 items-center justify-center px-3 text-[12px] font-semibold transition ${
+            className={`relative inline-flex h-[26px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 text-[10px] font-semibold transition md:h-7 md:px-3 md:text-[12px] ${
               isAllTypesActive(activeTypes)
                 ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
                 : "border-gray-200 bg-white text-gray-500 hover:border-fuchsia-200 hover:bg-fuchsia-50 hover:text-fuchsia-700"
@@ -2192,7 +2238,7 @@ function openPickedWork(
                 onClick={() =>
                   handleTypeToggle(type)
                 }
-                className={`group relative shrink-0 rounded-full border inline-flex h-7 items-center justify-center px-3 text-[12px] font-semibold transition ${
+                className={`group relative inline-flex h-[26px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 text-[10px] font-semibold transition md:h-7 md:px-3 md:text-[12px] ${
                   active
                     ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
                     : "border-gray-200 bg-white text-gray-500 hover:border-fuchsia-200 hover:bg-fuchsia-50 hover:text-fuchsia-700"
@@ -2221,7 +2267,7 @@ function openPickedWork(
             className="grid items-start"
             style={{
               gridTemplateColumns: `repeat(${Math.max(1, columnCount)}, minmax(0, 1fr))`,
-              gap: `${MASONRY_GAP}px`,
+              gap: `${masonryGap}px`,
             }}
           >
             {skeletonColumns.map(
@@ -2233,7 +2279,7 @@ function openPickedWork(
                   key={`skeleton-column-${columnIndex}`}
                   className="flex min-w-0 flex-col"
                   style={{
-                    gap: `${MASONRY_GAP}px`,
+                    gap: `${masonryGap}px`,
                   }}
                 >
                   {column.map(
@@ -2259,7 +2305,7 @@ function openPickedWork(
             className="grid items-start"
             style={{
               gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
-              gap: `${MASONRY_GAP}px`,
+              gap: `${masonryGap}px`,
             }}
           >
             {balancedLayout.columns.map(
@@ -2268,7 +2314,7 @@ function openPickedWork(
                   key={`column-${columnIndex}`}
                   className="flex min-w-0 flex-col"
                   style={{
-                    gap: `${MASONRY_GAP}px`,
+                    gap: `${masonryGap}px`,
                   }}
                 >
                   {column.map((work) => {
@@ -2425,20 +2471,20 @@ function openPickedWork(
                             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-t from-black/75 via-black/25 to-transparent transition duration-300 group-hover:from-black/80" />
 
                             {isPlayable && (
-                              <div className="pointer-events-none absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/45 text-[11px] text-white/90 backdrop-blur-[2px] transition duration-300 group-hover:bg-black/65 group-hover:text-white">
+                              <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-[10px] text-white/90 backdrop-blur-[2px] transition duration-300 group-hover:bg-black/65 group-hover:text-white md:right-3 md:top-3 md:h-8 md:w-8 md:text-[11px]">
                                 ▶
                               </div>
                             )}
 
                             {pickedWorkIds.has(work.id) && (
-                              <div className="pointer-events-none absolute left-3 top-3 flex h-8 items-center justify-center gap-1 rounded-full bg-fuchsia-600 px-3 text-[11px] font-bold text-white shadow-lg">
+                              <div className="pointer-events-none absolute left-2 top-2 flex h-7 items-center justify-center gap-1 rounded-full bg-fuchsia-600 px-2.5 text-[10px] font-bold text-white shadow-lg md:left-3 md:top-3 md:h-8 md:px-3 md:text-[11px]">
                                 <span aria-hidden="true">✓</span>
                                 Picked
                               </div>
                             )}
 
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 p-4 text-white">
-                              <h2 className="line-clamp-1 text-base font-bold tracking-tight text-white">
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-white md:p-4">
+                              <h2 className="line-clamp-1 text-sm font-bold tracking-tight text-white md:text-base">
                                 {
                                   work.artistName
                                 }
@@ -2485,6 +2531,46 @@ function openPickedWork(
     >
       {hasPicks ? "Next" : "Pass"}
     </button>
+
+    <button
+      type="button"
+      aria-label={
+        mobilePicksOpen
+          ? "Close My Picks"
+          : "Open My Picks"
+      }
+      aria-expanded={mobilePicksOpen}
+      onClick={() =>
+        setMobilePicksOpen(
+          (current) => !current,
+        )
+      }
+      className="absolute right-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-xl border border-gray-200 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-transform duration-200 xl:hidden"
+    >
+      <span
+        key={
+          mobilePickPlusOneKey > 0
+            ? `pick-btn-${mobilePickPlusOneKey}`
+            : "pick-btn-idle"
+        }
+        className={
+          mobilePickPlusOneKey > 0
+            ? "inline-flex animate-[pickPop_0.25s_ease-out]"
+            : "inline-flex"
+        }
+      >
+        <StackedCardsIcon />
+      </span>
+
+      {mobilePickPlusOneKey > 0 && (
+        <span
+          key={mobilePickPlusOneKey}
+          className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 animate-[pickPulse_0.65s_ease-out_forwards] whitespace-nowrap text-sm font-bold text-fuchsia-500"
+        >
+          +1
+        </span>
+      )}
+    </button>
   </div>
 </div>
 )}
@@ -2494,58 +2580,61 @@ function openPickedWork(
   refreshKey={pickPanelRefreshKey}
   works={candidateWorks}
   onWorkClick={openPickedWork}
+  mobileOpen={mobilePicksOpen}
+  onMobileOpenChange={setMobilePicksOpen}
 />
       {selectedWork && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-4"
           onClick={closeWorkModal}
         >
           <div
-            className="relative flex max-h-[80vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white"
+            className="relative flex h-[calc(100dvh-24px)] max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-none flex-col overflow-hidden rounded-2xl bg-white md:h-auto md:max-h-[80vh] md:w-full md:max-w-4xl md:flex-row"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex min-w-0 flex-1 items-center justify-center bg-neutral-900">
+            <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden bg-neutral-900">
               {selectedWork.type === "youtube" && selectedWork.videoId ? (
                 <iframe
                   src={`https://www.youtube.com/embed/${selectedWork.videoId}?autoplay=1&rel=0`}
                   title={`${selectedWork.artistName} video`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
-                  className="aspect-[9/16] max-h-[80vh] w-full"
+                  className="h-full max-h-full w-full max-w-full border-0 md:aspect-[9/16] md:max-h-[80vh] md:w-full"
                 />
               ) : selectedWork.type === "tiktok" &&
                 selectedWork.videoId ? (
                 <TikTokPlayerEmbed
                   videoId={selectedWork.videoId}
                   title={`${selectedWork.artistName} TikTok`}
+                  className="!h-full !max-h-full !w-full !max-w-full md:!aspect-[9/16] md:!h-[min(80vh,720px)] md:!w-[min(calc(min(80vh,720px)*9/16),100%)]"
                 />
               ) : (
                 <img
                   src={selectedWork.image}
                   alt={`${selectedWork.artistName} work`}
                   draggable={false}
-                  className="max-h-[80vh] w-full object-contain"
+                  className="max-h-full max-w-full object-contain md:max-h-[80vh] md:w-full"
                 />
               )}
             </div>
-            <aside className="relative w-[300px] shrink-0 bg-white p-6">
+            <aside className="relative w-full shrink-0 bg-white px-4 py-3.5 md:w-[300px] md:p-6">
               <button
                 type="button"
                 onClick={closeWorkModal}
                 aria-label="Close work"
-                className="absolute right-4 top-4 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-gray-100 text-lg text-gray-600 transition hover:bg-gray-200 hover:text-gray-950"
+                className="absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-gray-100 text-lg text-gray-600 transition hover:bg-gray-200 hover:text-gray-950 md:right-4 md:top-4"
               >
                 ×
               </button>
 
               <div className="pr-10">
-                <h2 className="text-2xl font-black tracking-tight text-gray-950">
+                <h2 className="truncate text-lg font-black tracking-tight text-gray-950 md:text-2xl">
                   {selectedWork.artistName}
                 </h2>
               </div>
 
               {selectedWork.caption && (
-                <p className="mt-5 line-clamp-[8] text-sm leading-6 text-gray-600">
+                <p className="mt-1.5 line-clamp-2 break-words text-sm leading-5 text-gray-600 md:mt-5 md:leading-6 md:line-clamp-[8]">
                   {selectedWork.caption}
                 </p>
               )}
@@ -2553,7 +2642,7 @@ function openPickedWork(
               <button
                 type="button"
                 onClick={() => togglePick(selectedWork)}
-                className={`mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-full border text-sm font-bold transition ${
+                className={`mt-2.5 flex h-11 w-full items-center justify-center gap-2 rounded-full border text-sm font-bold transition md:mt-6 md:h-11 ${
                   pickedWorkIds.has(selectedWork.id)
                     ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
                     : "border-gray-200 bg-white text-gray-800 hover:border-fuchsia-200 hover:text-fuchsia-600"
@@ -2567,7 +2656,7 @@ function openPickedWork(
 
               <Link
                 href={`/creator/${selectedWork.artistId}`}
-                className="mt-3 flex h-11 w-full cursor-pointer items-center justify-center rounded-full bg-gray-950 px-5 text-sm font-bold text-white transition hover:bg-gray-800"
+                className="mt-2 flex h-11 w-full cursor-pointer items-center justify-center rounded-full bg-gray-950 px-5 text-sm font-bold text-white transition hover:bg-gray-800 md:mt-3"
               >
                 View Artist Profile
               </Link>
