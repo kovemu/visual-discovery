@@ -6,17 +6,14 @@ import {
 import { createClient } from "@/lib/supabase/server";
 
 import {
-  DISCOVER_CATEGORIES,
-  getDiscoverCandidateBatch,
-} from "@/lib/discover/getRealDiscoverWorks";
+  discoverTypesToTags,
+  parseDiscoverTypesParam,
+  type DiscoverType,
+} from "@/lib/discover/discoverTypes";
+import { getDiscoverCandidateBatch } from "@/lib/discover/getRealDiscoverWorks";
 
 const ARTISTS_PER_BATCH = 10;
-
-function normalizeCategory(
-  category: string,
-) {
-  return category.trim().toLowerCase();
-}
+const MUSIC_CATEGORY = "music";
 
 function deterministicStartOffset(
   seed: string,
@@ -79,7 +76,7 @@ function computeVirtualRound(
 }
 
 async function getArtistPageCount(
-  category: string,
+  types: DiscoverType[],
 ) {
   const supabase =
     await createClient();
@@ -93,11 +90,10 @@ async function getArtistPageCount(
       count: "exact",
       head: true,
     })
-    .eq(
-      "category",
-      normalizeCategory(
-        category,
-      ),
+    .eq("category", MUSIC_CATEGORY)
+    .overlaps(
+      "tags",
+      discoverTypesToTags(types),
     );
 
   if (error) {
@@ -129,9 +125,14 @@ async function getArtistPageCount(
 export async function GET(
   request: NextRequest,
 ) {
-  const category =
+  const typesParam =
     request.nextUrl.searchParams.get(
-      "category",
+      "types",
+    );
+
+  const types =
+    parseDiscoverTypesParam(
+      typesParam,
     );
 
   const roundValue =
@@ -143,23 +144,6 @@ export async function GET(
     request.nextUrl.searchParams
       .get("seed")
       ?.trim() ?? "";
-
-  if (
-    !category ||
-    !DISCOVER_CATEGORIES.some(
-      (item) =>
-        item.toLowerCase() ===
-        category.toLowerCase(),
-    )
-  ) {
-    return NextResponse.json(
-      {
-        error:
-          "Valid category is required.",
-      },
-      { status: 400 },
-    );
-  }
 
   const clientRound = Number(
     roundValue ?? 0,
@@ -179,7 +163,7 @@ export async function GET(
   ) {
     const artistPageCount =
       await getArtistPageCount(
-        category,
+        types,
       );
     const startOffset =
       deterministicStartOffset(
@@ -223,7 +207,7 @@ export async function GET(
 
     const batch =
       await getDiscoverCandidateBatch(
-        category,
+        types,
         virtualRound,
       );
 
@@ -238,7 +222,7 @@ export async function GET(
 
   const batch =
     await getDiscoverCandidateBatch(
-      category,
+      types,
       safeRound,
     );
 

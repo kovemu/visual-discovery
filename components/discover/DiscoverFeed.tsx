@@ -6,12 +6,19 @@ import type { MutableRefObject } from "react";
 import AuthModal from "@/components/AuthModal";
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
 import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
+import {
+  DISCOVER_TYPE_TO_TAG,
+  DISCOVER_TYPES,
+  getTypesSignature,
+  type DiscoverType,
+} from "@/lib/discover/discoverTypes";
 
 export type FeedItem = {
   id: string;
   artistId: string;
   artistName: string;
   category: string;
+  artistTags?: string[];
   type?: "image" | "youtube" | "tiktok";
   image?: string;
   videoId?: string;
@@ -20,33 +27,25 @@ export type FeedItem = {
   artistUrl?: string;
 };
 
+const DISCOVER_TYPE_LABELS: Record<
+  DiscoverType,
+  string
+> = {
+  girl: "GIRL GROUPS",
+  boy: "BOY GROUPS",
+  solo: "SOLO",
+};
 
+const DEFAULT_ACTIVE_TYPES: DiscoverType[] =
+  [...DISCOVER_TYPES];
 
-
-const categories = ["DISCOVER", "Music", "Dance", "Art", "Cosplay"] as const;
-
-const DISCOVER_CATEGORY_STORAGE_KEY =
-  "kovemu-discover-category";
+const DISCOVER_TYPES_STORAGE_KEY =
+  "kovemu-discover-types";
 
 const DISCOVER_SEED_STORAGE_PREFIX =
   "kovemu-discover-seed-";
 
-type DiscoverCategory =
-  (typeof categories)[number];
-
-type CandidateCategory =
-  Exclude<
-    DiscoverCategory,
-    "DISCOVER"
-  >;
-
-const candidateCategories: CandidateCategory[] =
-  [
-    "Music",
-    "Dance",
-    "Art",
-    "Cosplay",
-  ];
+type TypesSignature = string;
 
 const CANDIDATE_REFILL_THRESHOLD = 24;
 
@@ -67,7 +66,7 @@ type WorkPageCycleState = {
 };
 
 function updateWorkPageCycleExhaustion(
-  category: CandidateCategory,
+  signature: TypesSignature,
   artistPage: number,
   artistPageCount: number,
   workPage: number,
@@ -75,18 +74,18 @@ function updateWorkPageCycleExhaustion(
   workPageCycleRef: MutableRefObject<
     Partial<
       Record<
-        CandidateCategory,
+        TypesSignature,
         WorkPageCycleState
       >
     >
   >,
-  exhaustedCategoriesRef: MutableRefObject<
-    Set<CandidateCategory>
+  exhaustedSignaturesRef: MutableRefObject<
+    Set<TypesSignature>
   >,
 ) {
   let state =
     workPageCycleRef.current[
-      category
+      signature
     ];
 
   if (
@@ -98,8 +97,8 @@ function updateWorkPageCycleExhaustion(
         state.artistPageCount &&
       !state.hasWorks
     ) {
-      exhaustedCategoriesRef.current.add(
-        category,
+      exhaustedSignaturesRef.current.add(
+        signature,
       );
     }
 
@@ -127,7 +126,7 @@ function updateWorkPageCycleExhaustion(
     }
   }
 
-  workPageCycleRef.current[category] =
+  workPageCycleRef.current[signature] =
     state;
 
   if (
@@ -135,69 +134,104 @@ function updateWorkPageCycleExhaustion(
     state.artistPageCount
   ) {
     if (!state.hasWorks) {
-      exhaustedCategoriesRef.current.add(
-        category,
+      exhaustedSignaturesRef.current.add(
+        signature,
       );
     }
 
     delete workPageCycleRef.current[
-      category
+      signature
     ];
   }
 }
 
-function isValidDiscoverCategory(
-  value: string | null,
-): value is DiscoverCategory {
-  if (!value) {
-    return false;
-  }
-
-  return (
-    categories as readonly string[]
-  ).includes(value);
+function isDiscoverTypeValue(
+  value: string,
+): value is DiscoverType {
+  return DISCOVER_TYPES.includes(
+    value as DiscoverType,
+  );
 }
 
-function readStoredDiscoverCategory(): DiscoverCategory {
+function normalizeActiveTypes(
+  types: DiscoverType[],
+): DiscoverType[] {
+  const unique = [
+    ...new Set(types),
+  ].filter(isDiscoverTypeValue);
+
+  if (unique.length === 0) {
+    return DEFAULT_ACTIVE_TYPES;
+  }
+
+  return unique;
+}
+
+function readStoredDiscoverTypes(): DiscoverType[] {
   try {
     const stored =
       sessionStorage.getItem(
-        DISCOVER_CATEGORY_STORAGE_KEY,
+        DISCOVER_TYPES_STORAGE_KEY,
       );
 
-    if (
-      isValidDiscoverCategory(
-        stored,
-      )
-    ) {
-      return stored;
+    if (!stored) {
+      return DEFAULT_ACTIVE_TYPES;
     }
+
+    const parsed = JSON.parse(
+      stored,
+    );
+
+    if (!Array.isArray(parsed)) {
+      return DEFAULT_ACTIVE_TYPES;
+    }
+
+    return normalizeActiveTypes(
+      parsed.filter(
+        (item): item is DiscoverType =>
+          typeof item === "string" &&
+          isDiscoverTypeValue(item),
+      ),
+    );
+  } catch {
+    return DEFAULT_ACTIVE_TYPES;
+  }
+}
+
+function saveDiscoverTypes(
+  types: DiscoverType[],
+) {
+  try {
+    sessionStorage.setItem(
+      DISCOVER_TYPES_STORAGE_KEY,
+      JSON.stringify(
+        normalizeActiveTypes(types),
+      ),
+    );
   } catch {
     // ignore
   }
-
-  return "DISCOVER";
 }
 
-function readStoredCategorySeed(
-  category: CandidateCategory,
+function readStoredTypesSeed(
+  signature: TypesSignature,
 ) {
   try {
     return sessionStorage.getItem(
-      `${DISCOVER_SEED_STORAGE_PREFIX}${category}`,
+      `${DISCOVER_SEED_STORAGE_PREFIX}${signature}`,
     );
   } catch {
     return null;
   }
 }
 
-function writeStoredCategorySeed(
-  category: CandidateCategory,
+function writeStoredTypesSeed(
+  signature: TypesSignature,
   seed: string,
 ) {
   try {
     sessionStorage.setItem(
-      `${DISCOVER_SEED_STORAGE_PREFIX}${category}`,
+      `${DISCOVER_SEED_STORAGE_PREFIX}${signature}`,
       seed,
     );
   } catch {
@@ -205,72 +239,85 @@ function writeStoredCategorySeed(
   }
 }
 
-function createCategorySeed() {
+function createTypesSeed() {
   return `${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2, 12)}`;
 }
 
-function getOrCreateCategorySeed(
-  category: CandidateCategory,
+function getOrCreateTypesSeed(
+  signature: TypesSignature,
   cache: Partial<
-    Record<
-      CandidateCategory,
-      string
-    >
+    Record<TypesSignature, string>
   >,
 ) {
-  if (cache[category]) {
-    return cache[category]!;
+  if (cache[signature]) {
+    return cache[signature]!;
   }
 
   const stored =
-    readStoredCategorySeed(
-      category,
-    );
+    readStoredTypesSeed(signature);
 
   if (stored) {
-    cache[category] = stored;
+    cache[signature] = stored;
     return stored;
   }
 
-  const seed =
-    createCategorySeed();
+  const seed = createTypesSeed();
 
-  writeStoredCategorySeed(
-    category,
+  writeStoredTypesSeed(
+    signature,
     seed,
   );
-  cache[category] =
-    seed;
+  cache[signature] = seed;
 
   return seed;
 }
 
-function saveDiscoverCategory(
-  category: string,
+function isAllTypesActive(
+  activeTypes: DiscoverType[],
 ) {
-  try {
-    sessionStorage.setItem(
-      DISCOVER_CATEGORY_STORAGE_KEY,
-      category,
-    );
-  } catch {
-    // ignore
+  return DISCOVER_TYPES.every((type) =>
+    activeTypes.includes(type),
+  );
+}
+
+function workMatchesActiveTypes(
+  work: FeedItem,
+  activeTypes: DiscoverType[],
+) {
+  const tags = work.artistTags ?? [];
+
+  if (tags.length === 0) {
+    return false;
   }
+
+  const activeTags = activeTypes.map(
+    (type) =>
+      DISCOVER_TYPE_TO_TAG[type],
+  );
+
+  return tags.some((tag) =>
+    activeTags.includes(tag),
+  );
+}
+
+function filterWorksByActiveTypes(
+  works: FeedItem[],
+  activeTypes: DiscoverType[],
+) {
+  return works.filter((work) =>
+    workMatchesActiveTypes(
+      work,
+      activeTypes,
+    ),
+  );
 }
 
 const DISCOVER_SET_SIZE = 12;
 
 const CANDIDATE_PREFETCH_THRESHOLD =
   DISCOVER_SET_SIZE * 3;
-
-const DISCOVER_QUOTA: Record<string, number> = {
-  Music: 6,
-  Dance: 3,
-  Art: 2,
-  Cosplay: 1,
-};
 
 const RECENT_ARTIST_HISTORY_LIMIT = 32;
 
@@ -781,10 +828,6 @@ function buildBalancedLayout(
   };
 }
 
-function normalizeCategory(category: string) {
-  return category.trim().toLowerCase();
-}
-
 function countUniqueArtists(works: FeedItem[]) {
   return new Set(works.map((work) => work.artistId)).size;
 }
@@ -827,30 +870,39 @@ function addWorksFromPool({
   }
 }
 
-function buildCategorySet(
+function buildDiscoverSet(
   works: FeedItem[],
-  category: string,
   recentArtists: string[],
 ) {
-  const pool = works.filter(
-    (work) => normalizeCategory(work.category) === normalizeCategory(category),
+  if (works.length === 0) return [];
+
+  const targetCount = Math.min(
+    DISCOVER_SET_SIZE,
+    works.length,
   );
-
-  if (pool.length === 0) return [];
-
-  const targetCount = Math.min(DISCOVER_SET_SIZE, pool.length);
-  const recentArtistIds = new Set(recentArtists);
-  const uniqueArtistCount = Math.max(1, countUniqueArtists(pool));
+  const recentArtistIds = new Set(
+    recentArtists,
+  );
+  const uniqueArtistCount = Math.max(
+    1,
+    countUniqueArtists(works),
+  );
   const maxArtistLimit = Math.max(
     1,
-    Math.ceil(targetCount / uniqueArtistCount) + 2,
+    Math.ceil(
+      targetCount / uniqueArtistCount,
+    ) + 2,
   );
 
-  for (let artistLimit = 1; artistLimit <= maxArtistLimit; artistLimit += 1) {
+  for (
+    let artistLimit = 1;
+    artistLimit <= maxArtistLimit;
+    artistLimit += 1
+  ) {
     const result: FeedItem[] = [];
 
     addWorksFromPool({
-      pool,
+      pool: works,
       result,
       targetCount,
       artistLimit,
@@ -859,7 +911,7 @@ function buildCategorySet(
     });
 
     addWorksFromPool({
-      pool,
+      pool: works,
       result,
       targetCount,
       artistLimit,
@@ -868,14 +920,16 @@ function buildCategorySet(
     });
 
     if (result.length >= targetCount) {
-      return result.slice(0, targetCount);
+      return shuffleWorks(
+        result,
+      ).slice(0, targetCount);
     }
   }
 
   const fallback: FeedItem[] = [];
 
   addWorksFromPool({
-    pool,
+    pool: works,
     result: fallback,
     targetCount,
     artistLimit: DISCOVER_SET_SIZE,
@@ -883,111 +937,9 @@ function buildCategorySet(
     avoidRecentArtists: false,
   });
 
-  return fallback.slice(0, targetCount);
-}
-
-function fillDiscoverQuota(
-  works: FeedItem[],
-  recentArtistIds: Set<string>,
-  artistLimit: number,
-  targetCount: number,
-) {
-  const result: FeedItem[] = [];
-
-  for (const [category, quota] of Object.entries(DISCOVER_QUOTA)) {
-    const categoryPool = works.filter(
-      (work) =>
-        normalizeCategory(work.category) === normalizeCategory(category),
-    );
-
-    const categoryTarget = Math.min(
-      targetCount,
-      result.length + quota,
-    );
-
-    addWorksFromPool({
-      pool: categoryPool,
-      result,
-      targetCount: categoryTarget,
-      artistLimit,
-      recentArtistIds,
-      avoidRecentArtists: true,
-    });
-
-    addWorksFromPool({
-      pool: categoryPool,
-      result,
-      targetCount: categoryTarget,
-      artistLimit,
-      recentArtistIds,
-      avoidRecentArtists: false,
-    });
-  }
-
-  return result;
-}
-
-function buildForYouSet(works: FeedItem[], recentArtists: string[]) {
-  if (works.length === 0) return [];
-
-  const recentArtistIds = new Set(recentArtists);
-  const uniqueArtistCount = Math.max(1, countUniqueArtists(works));
-  const maxArtistLimit = Math.max(
-    DISCOVER_SET_SIZE,
-    Math.ceil(DISCOVER_SET_SIZE / uniqueArtistCount) + 2,
-  );
-  const targetCount = Math.min(DISCOVER_SET_SIZE, works.length);
-
-  let bestResult: FeedItem[] = [];
-
-  for (let artistLimit = 1; artistLimit <= maxArtistLimit; artistLimit += 1) {
-    const result = fillDiscoverQuota(
-      works,
-      recentArtistIds,
-      artistLimit,
-      targetCount,
-    );
-
-    if (result.length > bestResult.length) {
-      bestResult = result;
-    }
-
-    if (result.length >= targetCount) {
-      return shuffleWorks(result).slice(0, targetCount);
-    }
-  }
-
-  addWorksFromPool({
-    pool: works,
-    result: bestResult,
-    targetCount,
-    artistLimit: DISCOVER_SET_SIZE,
-    recentArtistIds,
-    avoidRecentArtists: true,
-  });
-
-  addWorksFromPool({
-    pool: works,
-    result: bestResult,
-    targetCount,
-    artistLimit: DISCOVER_SET_SIZE,
-    recentArtistIds,
-    avoidRecentArtists: false,
-  });
-
-  return shuffleWorks(bestResult).slice(0, targetCount);
-}
-
-function buildDiscoverSet(
-  works: FeedItem[],
-  category: string,
-  recentArtists: string[],
-) {
-  if (category === "DISCOVER") {
-    return buildForYouSet(works, recentArtists);
-  }
-
-  return buildCategorySet(works, category, recentArtists);
+  return shuffleWorks(
+    fallback,
+  ).slice(0, targetCount);
 }
 
 function mergeUniqueWorks(
@@ -1033,7 +985,10 @@ const [
     useState(false);
   const [currentUserId, setCurrentUserId] =
     useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState("DISCOVER");
+  const [activeTypes, setActiveTypes] =
+    useState<DiscoverType[]>(
+      DEFAULT_ACTIVE_TYPES,
+    );
   const [
     candidateWorks,
     setCandidateWorks,
@@ -1061,24 +1016,17 @@ const [
     );
   const candidateRoundsRef =
     useRef<
-      Record<CandidateCategory, number>
-    >({
-      Music: 1,
-      Dance: 1,
-      Art: 1,
-      Cosplay: 1,
-    });
-  const exhaustedCategoriesRef =
+      Record<TypesSignature, number>
+    >({});
+  const exhaustedSignaturesRef =
     useRef<
-      Set<CandidateCategory>
-    >(
-      new Set(),
-    );
+      Set<TypesSignature>
+    >(new Set());
   const workPageCycleRef =
     useRef<
       Partial<
         Record<
-          CandidateCategory,
+          TypesSignature,
           WorkPageCycleState
         >
       >
@@ -1087,18 +1035,15 @@ const [
     useRef<
       Partial<
         Record<
-          CandidateCategory,
+          TypesSignature,
           Promise<void>
         >
       >
     >({});
-  const categorySeedsRef =
+  const typesSeedsRef =
     useRef<
       Partial<
-        Record<
-          CandidateCategory,
-          string
-        >
+        Record<TypesSignature, string>
       >
     >({});
   const applyingSetRef =
@@ -1149,15 +1094,26 @@ const [
       ],
     );
 
+  const activeTypesRef =
+    useRef(activeTypes);
+
+  useEffect(() => {
+    activeTypesRef.current =
+      activeTypes;
+  }, [activeTypes]);
+
   function getAvailableCandidates() {
-    return candidateWorksRef.current.filter(
-      (work) =>
-        !pickedWorkIdsRef.current.has(
-          work.id,
-        ) &&
-        !shownWorkIdsRef.current.has(
-          work.id,
-        ),
+    return filterWorksByActiveTypes(
+      candidateWorksRef.current.filter(
+        (work) =>
+          !pickedWorkIdsRef.current.has(
+            work.id,
+          ) &&
+          !shownWorkIdsRef.current.has(
+            work.id,
+          ),
+      ),
+      activeTypesRef.current,
     );
   }
 
@@ -1172,9 +1128,8 @@ const [
   }
 
   function applyCandidateBatch(
-    category: CandidateCategory,
+    signature: TypesSignature,
     data: CandidateBatchResponse,
-    replaceCategoryWorks: boolean,
   ) {
     const incoming =
       Array.isArray(data.works)
@@ -1184,26 +1139,7 @@ const [
       data.reusedInitialBatch ===
       true;
 
-    if (
-      replaceCategoryWorks &&
-      !reusedInitialBatch
-    ) {
-      candidateWorksRef.current =
-        mergeUniqueWorks(
-          candidateWorksRef.current.filter(
-            (work) =>
-              normalizeCategory(
-                work.category,
-              ) !==
-              normalizeCategory(
-                category,
-              ),
-          ),
-          incoming,
-        );
-    } else if (
-      !reusedInitialBatch
-    ) {
+    if (!reusedInitialBatch) {
       candidateWorksRef.current =
         mergeUniqueWorks(
           candidateWorksRef.current,
@@ -1228,48 +1164,44 @@ const [
         : 0;
     const incomingCount =
       reusedInitialBatch
-        ? candidateWorksRef.current.filter(
-            (work) =>
-              normalizeCategory(
-                work.category,
-              ) ===
-              normalizeCategory(
-                category,
-              ),
+        ? filterWorksByActiveTypes(
+            candidateWorksRef.current,
+            activeTypesRef.current,
           ).length
         : incoming.length;
 
     updateWorkPageCycleExhaustion(
-      category,
+      signature,
       artistPage,
       artistPageCount,
       workPage,
       incomingCount,
       workPageCycleRef,
-      exhaustedCategoriesRef,
+      exhaustedSignaturesRef,
     );
 
     candidateRoundsRef.current[
-      category
+      signature
     ] =
       typeof data.nextRound ===
       "number"
         ? data.nextRound
-        : candidateRoundsRef.current[
-            category
-          ] + 1;
+        : (candidateRoundsRef
+            .current[signature] ??
+            1) + 1;
   }
 
   async function fetchCandidateBatch(
-    category: CandidateCategory,
+    types: DiscoverType[],
     round: number,
     allowReuseRound0 = false,
   ) {
+    const signature =
+      getTypesSignature(types);
     const seed =
-      getOrCreateCategorySeed(
-        category,
-        categorySeedsRef
-          .current,
+      getOrCreateTypesSeed(
+        signature,
+        typesSeedsRef.current,
       );
 
     const reuseParam =
@@ -1278,8 +1210,8 @@ const [
         : "";
 
     const response = await fetch(
-      `/api/discover/candidates?category=${encodeURIComponent(
-        category,
+      `/api/discover/candidates?types=${encodeURIComponent(
+        types.join(","),
       )}&round=${round}&seed=${encodeURIComponent(
         seed,
       )}${reuseParam}`,
@@ -1294,69 +1226,90 @@ const [
     return (await response.json()) as CandidateBatchResponse;
   }
 
-  async function bootstrapInitialSeededCandidates() {
-    await Promise.all(
-      candidateCategories.map(
-        async (category) => {
-          try {
-            const data =
-              await fetchCandidateBatch(
-                category,
-                1,
-                true,
-              );
+  async function bootstrapInitialSeededCandidates(
+    types: DiscoverType[],
+    allowReuseRound0 = false,
+  ) {
+    const signature =
+      getTypesSignature(types);
 
-            applyCandidateBatch(
-              category,
-              data,
-              true,
-            );
-          } catch (error) {
-            console.error(
-              "BOOTSTRAP DISCOVER CANDIDATES ERROR:",
-              category,
-              error,
-            );
-          }
-        },
-      ),
-    );
+    if (
+      !candidateRoundsRef.current[
+        signature
+      ]
+    ) {
+      candidateRoundsRef.current[
+        signature
+      ] = 1;
+    }
+
+    try {
+      const data =
+        await fetchCandidateBatch(
+          types,
+          1,
+          allowReuseRound0,
+        );
+
+      applyCandidateBatch(
+        signature,
+        data,
+      );
+    } catch (error) {
+      console.error(
+        "BOOTSTRAP DISCOVER CANDIDATES ERROR:",
+        signature,
+        error,
+      );
+    }
 
     setCandidateWorks(
       candidateWorksRef.current,
     );
   }
 
-  async function refillCategory(
-    category: CandidateCategory,
+  async function refillCandidates(
+    types: DiscoverType[],
   ) {
+    const signature =
+      getTypesSignature(types);
+
     const existing =
       refillPromisesRef.current[
-        category
+        signature
       ];
 
     if (existing) {
       return existing;
     }
 
+    if (
+      !candidateRoundsRef.current[
+        signature
+      ]
+    ) {
+      candidateRoundsRef.current[
+        signature
+      ] = 1;
+    }
+
     const refillPromise =
       (async () => {
         const round =
           candidateRoundsRef.current[
-            category
+            signature
           ];
 
         try {
           const data =
             await fetchCandidateBatch(
-              category,
+              types,
               round,
             );
 
           applyCandidateBatch(
-            category,
+            signature,
             data,
-            false,
           );
 
           setCandidateWorks(
@@ -1370,140 +1323,92 @@ const [
         }
       })().finally(() => {
         delete refillPromisesRef.current[
-          category
+          signature
         ];
       });
 
     refillPromisesRef.current[
-      category
+      signature
     ] = refillPromise;
 
     return refillPromise;
   }
 
-  function getTargetCategories(
-    category: string,
-  ): CandidateCategory[] {
-    if (category === "DISCOVER") {
-      return candidateCategories;
-    }
-
-    if (
-      isValidDiscoverCategory(
-        category,
-      ) &&
-      category !== "DISCOVER"
-    ) {
-      return [
-        category as CandidateCategory,
-      ];
-    }
-
-    return [];
-  }
-
-  function countCategoryAvailable(
-    targetCategory: CandidateCategory,
-  ) {
-    return getAvailableCandidates().filter(
-      (work) =>
-        normalizeCategory(
-          work.category,
-        ) ===
-        normalizeCategory(
-          targetCategory,
-        ),
-    ).length;
+  function countAvailableCandidates() {
+    return getAvailableCandidates().length;
   }
 
   function maybePrefetchCandidates(
-    category: string,
+    types: DiscoverType[],
   ) {
-    for (const targetCategory of getTargetCategories(
-      category,
-    )) {
-      if (
-        exhaustedCategoriesRef.current.has(
-          targetCategory,
-        )
-      ) {
-        continue;
-      }
+    const signature =
+      getTypesSignature(types);
 
-      if (
-        countCategoryAvailable(
-          targetCategory,
-        ) <=
-        CANDIDATE_PREFETCH_THRESHOLD
-      ) {
-        void refillCategory(
-          targetCategory,
-        );
-      }
+    if (
+      exhaustedSignaturesRef.current.has(
+        signature,
+      )
+    ) {
+      return;
+    }
+
+    if (
+      countAvailableCandidates() <=
+      CANDIDATE_PREFETCH_THRESHOLD
+    ) {
+      void refillCandidates(types);
     }
   }
 
   async function ensureCandidatePool(
-    category: string,
+    types: DiscoverType[],
   ) {
-    maybePrefetchCandidates(
-      category,
-    );
+    maybePrefetchCandidates(types);
 
     if (
-      createNextSet(category)
-        .length >=
+      createNextSet(types).length >=
       DISCOVER_SET_SIZE
     ) {
       return;
     }
 
-    const targetCategories =
-      getTargetCategories(
-        category,
-      );
+    const signature =
+      getTypesSignature(types);
 
-    for (const targetCategory of targetCategories) {
-      if (
-        exhaustedCategoriesRef.current.has(
-          targetCategory,
-        )
-      ) {
-        continue;
-      }
+    if (
+      exhaustedSignaturesRef.current.has(
+        signature,
+      )
+    ) {
+      return;
+    }
 
-      const inFlight =
-        refillPromisesRef.current[
-          targetCategory
-        ];
+    const inFlight =
+      refillPromisesRef.current[
+        signature
+      ];
 
-      if (inFlight) {
-        await inFlight;
-      }
+    if (inFlight) {
+      await inFlight;
+    }
 
-      if (
-        createNextSet(category)
-          .length >=
-        DISCOVER_SET_SIZE
-      ) {
-        return;
-      }
+    if (
+      createNextSet(types).length >=
+      DISCOVER_SET_SIZE
+    ) {
+      return;
+    }
 
-      if (
-        countCategoryAvailable(
-          targetCategory,
-        ) <
-        CANDIDATE_REFILL_THRESHOLD
-      ) {
-        await refillCategory(
-          targetCategory,
-        );
-      }
+    if (
+      countAvailableCandidates() <
+      CANDIDATE_REFILL_THRESHOLD
+    ) {
+      await refillCandidates(types);
     }
   }
 
   function recycleShownCandidates(
-    category: string,
+    types: DiscoverType[],
   ) {
     const currentIds = new Set(
       displayWorks.map(
@@ -1515,17 +1420,11 @@ const [
       const work of
         candidateWorksRef.current
     ) {
-      const categoryMatches =
-        category === "DISCOVER" ||
-        normalizeCategory(
-          work.category,
-        ) ===
-          normalizeCategory(
-            category,
-          );
-
       if (
-        categoryMatches &&
+        workMatchesActiveTypes(
+          work,
+          types,
+        ) &&
         !currentIds.has(work.id)
       ) {
         shownWorkIdsRef.current.delete(
@@ -1536,12 +1435,11 @@ const [
   }
 
   function createNextSet(
-    category: string,
+    types: DiscoverType[],
   ) {
     let nextSet =
       buildDiscoverSet(
         getAvailableCandidates(),
-        category,
         recentArtistsRef.current,
       );
 
@@ -1549,13 +1447,10 @@ const [
       nextSet.length <
       DISCOVER_SET_SIZE
     ) {
-      recycleShownCandidates(
-        category,
-      );
+      recycleShownCandidates(types);
 
       nextSet = buildDiscoverSet(
         getAvailableCandidates(),
-        category,
         recentArtistsRef.current,
       );
     }
@@ -1563,7 +1458,34 @@ const [
     return nextSet;
   }
 
- async function applyNewSet(category: string, scrollToTop = false) {
+  function resetCandidatePaginationState() {
+    exhaustedSignaturesRef.current =
+      new Set();
+    workPageCycleRef.current = {};
+    refillPromisesRef.current = {};
+  }
+
+  function ensureCandidateRoundForTypes(
+    types: DiscoverType[],
+  ) {
+    const signature =
+      getTypesSignature(types);
+
+    if (
+      !candidateRoundsRef.current[
+        signature
+      ]
+    ) {
+      candidateRoundsRef.current[
+        signature
+      ] = 1;
+    }
+  }
+
+ async function applyNewSet(
+  types: DiscoverType[],
+  scrollToTop = false,
+) {
   if (applyingSetRef.current) {
     return;
   }
@@ -1572,11 +1494,11 @@ const [
 
   try {
     await ensureCandidatePool(
-      category,
+      types,
     );
 
     const nextSet = createNextSet(
-      category,
+      types,
     );
 
     setDisplayWorks(nextSet);
@@ -1602,7 +1524,7 @@ const [
     }
 
     maybePrefetchCandidates(
-      category,
+      types,
     );
   } finally {
     applyingSetRef.current = false;
@@ -1620,13 +1542,8 @@ const [
     candidateWorksRef.current =
       works;
     setCandidateWorks(works);
-    candidateRoundsRef.current = {
-      Music: 1,
-      Dance: 1,
-      Art: 1,
-      Cosplay: 1,
-    };
-    exhaustedCategoriesRef.current =
+    candidateRoundsRef.current = {};
+    exhaustedSignaturesRef.current =
       new Set();
     workPageCycleRef.current = {};
     refillPromisesRef.current = {};
@@ -1676,30 +1593,37 @@ const [
         new Set();
     }
 
-    // 이미 Pick한 작품은 첫 화면에서도 제외
-    await bootstrapInitialSeededCandidates();
+    const initialTypes =
+      readStoredDiscoverTypes();
+
+    setActiveTypes(initialTypes);
+    saveDiscoverTypes(initialTypes);
+    ensureCandidateRoundForTypes(
+      initialTypes,
+    );
+
+    await bootstrapInitialSeededCandidates(
+      initialTypes,
+      isAllTypesActive(initialTypes),
+
+    );
 
     const availableWorks =
-      candidateWorksRef.current.filter(
-        (work) =>
-          !loadedPickedIds.has(
-            work.id,
-          ),
+      filterWorksByActiveTypes(
+        candidateWorksRef.current.filter(
+          (work) =>
+            !loadedPickedIds.has(
+              work.id,
+            ),
+        ),
+        initialTypes,
       );
-
-    const initialCategory =
-      readStoredDiscoverCategory();
 
     const initialSet =
       buildDiscoverSet(
         availableWorks,
-        initialCategory,
         [],
       );
-
-    setSelectedCategory(
-      initialCategory,
-    );
 
     setDisplayWorks(
       initialSet,
@@ -1721,7 +1645,7 @@ const [
       );
 
     maybePrefetchCandidates(
-      initialCategory,
+      initialTypes,
     );
     } finally {
       setIsInitializing(false);
@@ -1789,7 +1713,39 @@ const [
     };
   }, [selectedWork]);
 
-  function handleCategoryClick(category: string) {
+  async function applyTypeFilterChange(
+    nextTypes: DiscoverType[],
+  ) {
+    const normalized =
+      normalizeActiveTypes(
+        nextTypes,
+      );
+
+    resetCandidatePaginationState();
+    ensureCandidateRoundForTypes(
+      normalized,
+    );
+
+    activeTypesRef.current =
+      normalized;
+    setActiveTypes(normalized);
+    saveDiscoverTypes(normalized);
+
+    await bootstrapInitialSeededCandidates(
+      normalized,
+    );
+
+    setCandidateWorks(
+      candidateWorksRef.current,
+    );
+
+    await applyNewSet(
+      normalized,
+      false,
+    );
+  }
+
+  function handleAllClick() {
     if (
       transitionStage !== "idle" ||
       applyingSetRef.current
@@ -1797,12 +1753,45 @@ const [
       return;
     }
 
-    setSelectedCategory(category);
-    saveDiscoverCategory(category);
-    void applyNewSet(
-      category,
-      false,
+    if (isAllTypesActive(activeTypes)) {
+      return;
+    }
+
+    void applyTypeFilterChange(
+      DEFAULT_ACTIVE_TYPES,
     );
+  }
+
+  function handleTypeToggle(
+    type: DiscoverType,
+  ) {
+    if (
+      transitionStage !== "idle" ||
+      applyingSetRef.current
+    ) {
+      return;
+    }
+
+    const isActive =
+      activeTypes.includes(type);
+
+    if (isActive) {
+      if (activeTypes.length <= 1) {
+        return;
+      }
+
+      void applyTypeFilterChange(
+        activeTypes.filter(
+          (item) => item !== type,
+        ),
+      );
+      return;
+    }
+
+    void applyTypeFilterChange([
+      ...activeTypes,
+      type,
+    ]);
   }
 
   function handleNext() {
@@ -1840,12 +1829,12 @@ const [
 
       try {
         await ensureCandidatePool(
-          selectedCategory,
+          activeTypes,
         );
 
         const nextSet =
           createNextSet(
-            selectedCategory,
+            activeTypes,
           );
 
         const nextArtistIds =
@@ -1885,7 +1874,7 @@ const [
         },240);
 
         maybePrefetchCandidates(
-          selectedCategory,
+          activeTypes,
         );
       } finally {
         applyingSetRef.current =
@@ -2157,22 +2146,46 @@ function openPickedWork(
   return (
     <>
       <nav className="border-b border-gray-100 bg-white py-4">
-        <div className="flex items-center gap-7 overflow-x-auto text-sm font-semibold [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {categories.map((category) => {
-            const active = selectedCategory === category;
+        <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <span className="mr-3 shrink-0 border-b-2 border-fuchsia-600 pb-2 text-[15px] font-bold tracking-tight text-fuchsia-600">
+            DISCOVER
+          </span>
+
+          <button
+            type="button"
+            onClick={handleAllClick}
+            className={`relative shrink-0 rounded-full border inline-flex h-7 items-center justify-center px-3 text-[12px] font-semibold transition ${
+              isAllTypesActive(activeTypes)
+                ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
+                : "border-gray-200 bg-white text-gray-500 hover:border-fuchsia-200 hover:bg-fuchsia-50 hover:text-fuchsia-700"
+            }`}
+          >
+            ALL
+          </button>
+
+          {DISCOVER_TYPES.map((type) => {
+            const active =
+              activeTypes.includes(type);
 
             return (
               <button
-                key={category}
+                key={type}
                 type="button"
-                onClick={() => handleCategoryClick(category)}
-                className={`shrink-0 cursor-pointer border-b-2 pb-2 transition ${
+                onClick={() =>
+                  handleTypeToggle(type)
+                }
+                className={`group relative shrink-0 rounded-full border inline-flex h-7 items-center justify-center px-3 text-[12px] font-semibold transition ${
                   active
-                    ? "border-fuchsia-600 text-fuchsia-600"
-                    : "border-transparent text-gray-500 hover:text-gray-900"
+                    ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
+                    : "border-gray-200 bg-white text-gray-500 hover:border-fuchsia-200 hover:bg-fuchsia-50 hover:text-fuchsia-700"
                 }`}
               >
-                {category}
+                {DISCOVER_TYPE_LABELS[type]}
+                {active && (
+                  <span className="pointer-events-none absolute -right-0.5 -top-0.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-[9px] font-bold leading-none text-fuchsia-600 group-hover:flex">
+                    ×
+                  </span>
+                )}
               </button>
             );
           })}
@@ -2407,13 +2420,7 @@ function openPickedWork(
                             )}
 
                             <div className="pointer-events-none absolute inset-x-0 bottom-0 p-4 text-white">
-                              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">
-                                {
-                                  work.category
-                                }
-                              </p>
-
-                              <h2 className="mt-1 line-clamp-1 text-base font-bold tracking-tight text-white">
+                              <h2 className="line-clamp-1 text-base font-bold tracking-tight text-white">
                                 {
                                   work.artistName
                                 }
@@ -2430,7 +2437,7 @@ function openPickedWork(
           </div>
         ) : (
           <p className="text-sm text-gray-500">
-            No works in this category yet.
+            No works yet.
           </p>
         )}
       </div>
@@ -2514,11 +2521,7 @@ function openPickedWork(
               </button>
 
               <div className="pr-10">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-fuchsia-600">
-                  {selectedWork.category}
-                </p>
-
-                <h2 className="mt-2 text-2xl font-black tracking-tight text-gray-950">
+                <h2 className="text-2xl font-black tracking-tight text-gray-950">
                   {selectedWork.artistName}
                 </h2>
               </div>

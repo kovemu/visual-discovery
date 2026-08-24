@@ -1,16 +1,23 @@
 import { createClient } from "@/lib/supabase/server";
 
 import type { FeedItem } from "@/components/discover/DiscoverFeed";
+import {
+  DISCOVER_TYPES,
+  discoverTypesToTags,
+  type DiscoverType,
+} from "@/lib/discover/discoverTypes";
 
-export const DISCOVER_CATEGORIES = [
-  "Music",
-  "Dance",
-  "Art",
-  "Cosplay",
-] as const;
+export {
+  DISCOVER_TYPES,
+  DISCOVER_TYPE_TO_TAG,
+  discoverTypesToTags,
+  getTypesSignature,
+  isDiscoverType,
+  parseDiscoverTypesParam,
+  type DiscoverType,
+} from "@/lib/discover/discoverTypes";
 
-export type DiscoverCategory =
-  (typeof DISCOVER_CATEGORIES)[number];
+const MUSIC_CATEGORY = "music";
 
 const ARTISTS_PER_BATCH = 10;
 const WORKS_PER_ARTIST = 6;
@@ -31,6 +38,7 @@ type ArtistWithWorks = {
   id: string;
   name: string;
   category: string;
+  tags: string[] | null;
   works: WorkRow[];
 };
 
@@ -65,22 +73,6 @@ function buildBatchMetadata(
   };
 }
 
-function normalizeCategory(
-  category: string,
-) {
-  return category.trim().toLowerCase();
-}
-
-function isDiscoverCategory(
-  category: string,
-): category is DiscoverCategory {
-  return DISCOVER_CATEGORIES.some(
-    (item) =>
-      normalizeCategory(item) ===
-      normalizeCategory(category),
-  );
-}
-
 function mapWork(
   work: WorkRow,
   artist: ArtistWithWorks,
@@ -88,6 +80,8 @@ function mapWork(
   const category =
     artist.category.charAt(0).toUpperCase() +
     artist.category.slice(1);
+  const artistTags =
+    artist.tags ?? [];
 
   if (
     work.source === "youtube" &&
@@ -100,6 +94,7 @@ function mapWork(
       artistName: artist.name,
 
       category,
+      artistTags,
 
       type: "youtube",
 
@@ -130,6 +125,7 @@ function mapWork(
       artistName: artist.name,
 
       category,
+      artistTags,
 
       type: "tiktok",
 
@@ -156,6 +152,7 @@ function mapWork(
     artistName: artist.name,
 
     category,
+    artistTags,
 
     type: "image",
 
@@ -175,24 +172,20 @@ function mapWork(
 }
 
 export async function getDiscoverCandidateBatch(
-  category: string,
+  types: DiscoverType[],
   round = 0,
 ): Promise<DiscoverCandidateBatch> {
+  const safeTypes =
+    types.length > 0
+      ? types
+      : [...DISCOVER_TYPES];
+  const tagFilters =
+    discoverTypesToTags(safeTypes);
+
   const safeRound = Math.max(
     0,
     Math.floor(round),
   );
-
-  if (!isDiscoverCategory(category)) {
-    return {
-      works: [],
-      nextRound: safeRound + 1,
-      ...buildBatchMetadata(
-        safeRound,
-        null,
-      ),
-    };
-  }
 
   const supabase = await createClient();
 
@@ -208,10 +201,8 @@ export async function getDiscoverCandidateBatch(
         count: "exact",
         head: true,
       })
-      .eq(
-        "category",
-        normalizeCategory(category),
-      );
+      .eq("category", MUSIC_CATEGORY)
+      .overlaps("tags", tagFilters);
 
     if (countError) {
       console.log(
@@ -259,6 +250,7 @@ export async function getDiscoverCandidateBatch(
         id,
         name,
         category,
+        tags,
         works (
           id,
           type,
@@ -271,10 +263,8 @@ export async function getDiscoverCandidateBatch(
           published_at
         )
       `)
-      .eq(
-        "category",
-        normalizeCategory(category),
-      )
+      .eq("category", MUSIC_CATEGORY)
+      .overlaps("tags", tagFilters)
       .order("id", {
         ascending: false,
       })
@@ -340,26 +330,11 @@ export async function getDiscoverCandidateBatch(
 }
 
 export async function getRealDiscoverWorks(): Promise<FeedItem[]> {
-  const batches = await Promise.all(
-    DISCOVER_CATEGORIES.map(
-      (category) =>
-        getDiscoverCandidateBatch(
-          category,
-          0,
-        ),
-    ),
-  );
+  const batch =
+    await getDiscoverCandidateBatch(
+      [...DISCOVER_TYPES],
+      0,
+    );
 
-  return Array.from(
-    new Map(
-      batches
-        .flatMap(
-          (batch) => batch.works,
-        )
-        .map((work) => [
-          work.id,
-          work,
-        ]),
-    ).values(),
-  );
+  return batch.works;
 }
