@@ -5,12 +5,14 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
   useState,
 } from "react";
 
+import AuthModal from "@/components/AuthModal";
 import { createClient } from "@/lib/supabase/client";
 
 type PickPanelWork = {
@@ -160,6 +162,7 @@ export default function MyPicksPanel({
   refreshKey,
   onWorkClick,
 }: MyPicksPanelProps) {
+  const router = useRouter();
   const supabase = useMemo(
     () => createClient(),
     [],
@@ -167,6 +170,16 @@ export default function MyPicksPanel({
 
   const [open, setOpen] =
     useState(false);
+
+  const [
+    isAuthenticated,
+    setIsAuthenticated,
+  ] = useState(false);
+
+  const [
+    showAuthModal,
+    setShowAuthModal,
+  ] = useState(false);
 
   const [
     showAdded,
@@ -241,6 +254,12 @@ function changeFilter(
     } =
       supabase.auth.onAuthStateChange(
         (event, session) => {
+          setIsAuthenticated(
+            Boolean(
+              session?.user,
+            ),
+          );
+
           if (
             event ===
               "SIGNED_OUT" ||
@@ -285,10 +304,13 @@ function changeFilter(
         await supabase.auth.getUser();
 
       if (!user) {
+        setIsAuthenticated(false);
         setPickRows([]);
         setLoading(false);
         return;
       }
+
+      setIsAuthenticated(true);
 
       const {
         data,
@@ -528,7 +550,17 @@ function changeFilter(
       workMap,
     ]);
 
+  function handleViewAllClick() {
+    if (isAuthenticated) {
+      router.push("/me");
+      return;
+    }
+
+    setShowAuthModal(true);
+  }
+
   return (
+    <>
     <div
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
@@ -618,12 +650,13 @@ function changeFilter(
     My Picks
   </h2>
 
-  <Link
-    href="/me"
+  <button
+    type="button"
+    onClick={handleViewAllClick}
     className="text-xs font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
   >
     View all →
-  </Link>
+  </button>
 </div>
 
             {/* Filter */}
@@ -847,5 +880,16 @@ const right =
         
       </div>
     </div>
+
+    <AuthModal
+      open={showAuthModal}
+      onClose={() =>
+        setShowAuthModal(false)
+      }
+      onSuccess={() => {
+        router.push("/me");
+      }}
+    />
+    </>
   );
 }
