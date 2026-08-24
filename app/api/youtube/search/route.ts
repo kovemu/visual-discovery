@@ -5,6 +5,8 @@ import {
 
 import { createClient } from "@supabase/supabase-js";
 
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+
 const YOUTUBE_API_KEY =
   process.env.YOUTUBE_API_KEY;
 
@@ -306,6 +308,12 @@ async function loadVideoDetails(
 export async function GET(
   request: NextRequest,
 ) {
+  const auth = await requireAdmin();
+
+  if (!auth.ok) {
+    return adminAuthErrorResponse(auth);
+  }
+
   try {
     if (!YOUTUBE_API_KEY) {
       return NextResponse.json(
