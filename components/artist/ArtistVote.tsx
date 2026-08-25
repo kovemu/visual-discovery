@@ -31,10 +31,6 @@ export default function ArtistVote({
   const normalizedCategory =
     category.trim().toLowerCase();
 
-  const displayCategory =
-    normalizedCategory.charAt(0).toUpperCase() +
-    normalizedCategory.slice(1);
-
   const [currentVote, setCurrentVote] =
     useState<CurrentVote | null>(null);
 
@@ -198,12 +194,12 @@ export default function ArtistVote({
         </p>
 
         <h2 className="mt-2 text-xl font-black text-gray-950">
-          {displayCategory}
+          Vote for {artistName}
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-gray-500">
-          Choose one artist in this
-          category each week.
+          Support your pick in this
+          week&apos;s ranking.
         </p>
 
         {loading ? (
@@ -212,7 +208,7 @@ export default function ArtistVote({
           </div>
         ) : isCurrentArtist ? (
           <div className="mt-5 flex h-11 items-center justify-center rounded-full border border-fuchsia-200 bg-fuchsia-50 px-5 text-sm font-bold text-fuchsia-700">
-            ✓ Your {displayCategory} Vote
+            ✓ Voted for {artistName}
           </div>
         ) : (
           <button
@@ -233,10 +229,9 @@ export default function ArtistVote({
           currentVote &&
           !isCurrentArtist && (
             <p className="mt-3 text-xs leading-5 text-gray-400">
-              You already used your{" "}
-              {displayCategory} vote this
-              week. Voting here will change
-              your current choice.
+              You already voted this week.
+              Voting here will change your
+              current choice.
             </p>
           )}
 

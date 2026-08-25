@@ -12,8 +12,8 @@ import {
   useState,
 } from "react";
 
-import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
 import TikTokThumbnail from "@/components/works/TikTokThumbnail";
+import ProfileWorkModal from "@/components/artist/ProfileWorkModal";
 
 type LatestWork = {
   id: string;
@@ -105,34 +105,6 @@ export default function LatestWorksCarousel({
     };
   }, [sortedWorks]);
 
-  useEffect(() => {
-    if (!selectedWork) return;
-
-    const handleKeyDown = (
-      event: KeyboardEvent,
-    ) => {
-      if (event.key === "Escape") {
-        setSelectedWork(null);
-      }
-    };
-
-    document.body.style.overflow = "hidden";
-
-    window.addEventListener(
-      "keydown",
-      handleKeyDown,
-    );
-
-    return () => {
-      document.body.style.overflow = "";
-
-      window.removeEventListener(
-        "keydown",
-        handleKeyDown,
-      );
-    };
-  }, [selectedWork]);
-
   const scrollLeft = () => {
     const container = scrollRef.current;
 
@@ -164,7 +136,7 @@ export default function LatestWorksCarousel({
       <div className="relative mt-6">
         <div
           ref={scrollRef}
-          className="flex gap-4 overflow-x-auto pr-[80px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex gap-3 overflow-x-auto pr-[80px] [scrollbar-width:none] md:gap-4 [&::-webkit-scrollbar]:hidden"
         >
           {sortedWorks.map((work) => (
             <button
@@ -173,7 +145,7 @@ export default function LatestWorksCarousel({
               onClick={() =>
                 setSelectedWork(work)
               }
-              className="group w-[23%] min-w-[23%] shrink-0 cursor-pointer overflow-hidden rounded-2xl border border-gray-200 bg-white text-left"
+              className="group w-[37%] min-w-[37%] shrink-0 cursor-pointer overflow-hidden rounded-2xl border border-gray-200 bg-white text-left md:w-[23%] md:min-w-[23%]"
             >
               {work.type === "youtube" &&
               work.videoId ? (
@@ -223,7 +195,7 @@ export default function LatestWorksCarousel({
               )}
 
               {work.caption && (
-                <div className="p-3">
+                <div className="p-2 md:p-3">
                   <p className="line-clamp-2 text-sm text-gray-600">
                     {work.caption}
                   </p>
@@ -239,7 +211,7 @@ export default function LatestWorksCarousel({
               type="button"
               onClick={scrollLeft}
               aria-label="Previous latest works"
-              className={`absolute left-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition ${
+              className={`absolute left-2 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition md:h-10 md:w-10 ${
                 canScrollLeft
                   ? "cursor-pointer opacity-100 hover:scale-105"
                   : "cursor-default opacity-30"
@@ -252,7 +224,7 @@ export default function LatestWorksCarousel({
               type="button"
               onClick={scrollRight}
               aria-label="Next latest works"
-              className={`absolute right-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition ${
+              className={`absolute right-2 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition md:h-10 md:w-10 ${
                 canScrollRight
                   ? "cursor-pointer opacity-100 hover:scale-105"
                   : "cursor-default opacity-30"
@@ -264,59 +236,13 @@ export default function LatestWorksCarousel({
         )}
       </div>
 
-      {selectedWork && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-          onClick={() =>
-            setSelectedWork(null)
-          }
-        >
-          <div
-            className="relative max-h-[85vh] overflow-hidden rounded-2xl bg-black"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <button
-              type="button"
-              onClick={() =>
-                setSelectedWork(null)
-              }
-              aria-label="Close"
-              className="absolute right-4 top-4 z-20 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-xl text-white"
-            >
-              ×
-            </button>
-
-            {selectedWork.type ===
-              "youtube" &&
-            selectedWork.videoId ? (
-              <iframe
-                src={`https://www.youtube.com/embed/${selectedWork.videoId}?autoplay=1&rel=0`}
-                title={`${artistName} video`}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="aspect-[9/16] h-[80vh] max-h-[760px]"
-              />
-            ) : selectedWork.type ===
-                "tiktok" &&
-              selectedWork.videoId ? (
-              <TikTokPlayerEmbed
-                videoId={
-                  selectedWork.videoId
-                }
-                title={`${artistName} video`}
-              />
-            ) : selectedWork.image ? (
-              <img
-                src={selectedWork.image}
-                alt={`${artistName} work`}
-                className="max-h-[80vh] max-w-[90vw] object-contain"
-              />
-            ) : null}
-          </div>
-        </div>
-      )}
+      <ProfileWorkModal
+        work={selectedWork}
+        artistName={artistName}
+        onClose={() =>
+          setSelectedWork(null)
+        }
+      />
     </>
   );
 }

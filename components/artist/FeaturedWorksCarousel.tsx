@@ -3,6 +3,7 @@
 import {
   ChevronLeft,
   ChevronRight,
+  Play,
 } from "lucide-react";
 
 import {
@@ -12,7 +13,7 @@ import {
   useState,
 } from "react";
 
-import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
+import ProfileWorkModal from "@/components/artist/ProfileWorkModal";
 import TikTokThumbnail from "@/components/works/TikTokThumbnail";
 
 type FeaturedWork = {
@@ -28,6 +29,23 @@ type FeaturedWorksCarouselProps = {
   works: FeaturedWork[];
   artistName: string;
 };
+
+function getFeaturedThumbnail(
+  work: FeaturedWork,
+) {
+  if (work.image) {
+    return work.image;
+  }
+
+  if (
+    work.type === "youtube" &&
+    work.videoId
+  ) {
+    return `https://i.ytimg.com/vi/${work.videoId}/hqdefault.jpg`;
+  }
+
+  return null;
+}
 
 export default function FeaturedWorksCarousel({
   works,
@@ -109,34 +127,6 @@ export default function FeaturedWorksCarousel({
     };
   }, [sortedWorks]);
 
-  useEffect(() => {
-    if (!selectedWork) return;
-
-    const handleKeyDown = (
-      event: KeyboardEvent,
-    ) => {
-      if (event.key === "Escape") {
-        setSelectedWork(null);
-      }
-    };
-
-    document.body.style.overflow = "hidden";
-
-    window.addEventListener(
-      "keydown",
-      handleKeyDown,
-    );
-
-    return () => {
-      document.body.style.overflow = "";
-
-      window.removeEventListener(
-        "keydown",
-        handleKeyDown,
-      );
-    };
-  }, [selectedWork]);
-
   const scrollLeft = () => {
     const container = scrollRef.current;
 
@@ -168,64 +158,64 @@ export default function FeaturedWorksCarousel({
       <div className="relative mt-6">
         <div
           ref={scrollRef}
-          className="flex gap-5 overflow-x-auto pr-[120px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex gap-3 overflow-x-auto pr-[120px] [scrollbar-width:none] md:gap-5 [&::-webkit-scrollbar]:hidden"
         >
-          {sortedWorks.map((work) => (
-            <article
-              key={work.id}
-              className="w-[calc((100%-20px)/2)] min-w-[calc((100%-20px)/2)] shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-white"
-            >
-              {work.type === "youtube" &&
-              work.videoId ? (
-                <iframe
-                  src={`https://www.youtube.com/embed/${work.videoId}?rel=0`}
-                  title={`${artistName} featured work`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  className="aspect-video w-full"
-                />
-              ) : work.type === "tiktok" &&
-                work.videoId ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSelectedWork(work)
-                  }
-                  className="group relative block w-full cursor-pointer text-left"
-                >
-                  <div className="relative aspect-[9/16] overflow-hidden bg-black">
+          {sortedWorks.map((work) => {
+            const thumbnail =
+              getFeaturedThumbnail(
+                work,
+              );
+
+            return (
+              <button
+                key={work.id}
+                type="button"
+                onClick={() =>
+                  setSelectedWork(work)
+                }
+                className="group w-[92%] min-w-[92%] shrink-0 cursor-pointer overflow-hidden rounded-2xl border border-gray-200 bg-white text-left active:opacity-95 md:w-[calc((100%-20px)/2)] md:min-w-[calc((100%-20px)/2)]"
+              >
+                <div className="relative aspect-video overflow-hidden bg-black">
+                  {work.type === "tiktok" &&
+                  work.videoId ? (
                     <TikTokThumbnail
                       src={work.image}
                       alt={`${artistName} featured work`}
                       className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                       placeholderClassName="h-full w-full"
                     />
+                  ) : thumbnail ? (
+                    <img
+                      src={thumbnail}
+                      alt={`${artistName} featured work`}
+                      draggable={false}
+                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-gray-100" />
+                  )}
 
-                    <div className="absolute inset-0 bg-black/10 transition group-hover:bg-black/20" />
-
-                    <div className="absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white">
-                      ▶
-                    </div>
+                  <div
+                    aria-hidden="true"
+                    className="absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white transition duration-300 group-hover:bg-black/70"
+                  >
+                    <Play
+                      size={20}
+                      className="fill-current"
+                    />
                   </div>
-                </button>
-              ) : work.image ? (
-                <img
-                  src={work.image}
-                  alt={`${artistName} featured work`}
-                  draggable={false}
-                  className="aspect-video w-full object-cover"
-                />
-              ) : null}
-
-              {work.caption && (
-                <div className="p-4">
-                  <p className="line-clamp-1 text-sm font-semibold leading-5 text-gray-950">
-                    {work.caption}
-                  </p>
                 </div>
-              )}
-            </article>
-          ))}
+
+                {work.caption && (
+                  <div className="p-3">
+                    <p className="line-clamp-2 break-words text-sm font-semibold leading-5 text-gray-950">
+                      {work.caption}
+                    </p>
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {sortedWorks.length > 2 && (
@@ -234,7 +224,7 @@ export default function FeaturedWorksCarousel({
               type="button"
               onClick={scrollLeft}
               aria-label="Previous featured works"
-              className={`absolute left-2 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition ${
+              className={`absolute left-2 top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition md:flex ${
                 canScrollLeft
                   ? "cursor-pointer opacity-100 hover:scale-105"
                   : "cursor-default opacity-30"
@@ -247,7 +237,7 @@ export default function FeaturedWorksCarousel({
               type="button"
               onClick={scrollRight}
               aria-label="Next featured works"
-              className={`absolute right-2 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition ${
+              className={`absolute right-2 top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-sm transition md:flex ${
                 canScrollRight
                   ? "cursor-pointer opacity-100 hover:scale-105"
                   : "cursor-default opacity-30"
@@ -259,41 +249,13 @@ export default function FeaturedWorksCarousel({
         )}
       </div>
 
-      {selectedWork &&
-        selectedWork.type === "tiktok" &&
-        selectedWork.videoId && (
-          <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-            onClick={() =>
-              setSelectedWork(null)
-            }
-          >
-            <div
-              className="relative max-h-[85vh] overflow-hidden rounded-2xl bg-black"
-              onClick={(event) =>
-                event.stopPropagation()
-              }
-            >
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedWork(null)
-                }
-                aria-label="Close"
-                className="absolute right-4 top-4 z-20 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-xl text-white"
-              >
-                ×
-              </button>
-
-              <TikTokPlayerEmbed
-                videoId={
-                  selectedWork.videoId
-                }
-                title={`${artistName} featured work`}
-              />
-            </div>
-          </div>
-        )}
+      <ProfileWorkModal
+        work={selectedWork}
+        artistName={artistName}
+        onClose={() =>
+          setSelectedWork(null)
+        }
+      />
     </>
   );
 }

@@ -5,17 +5,35 @@ import ArtistVote from "@/components/artist/ArtistVote";
 import ProfileMyPicks from "@/components/artist/ProfileMyPicks";
 
 import {
+  createLucideIcon,
   ExternalLink,
-  Camera,
-  Play,
 } from "lucide-react";
+
+const Youtube = createLucideIcon("Youtube", [
+  [
+    "path",
+    {
+      d: "M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17",
+    },
+  ],
+  ["path", { d: "m10 15 5-3-5-3z" }],
+]);
+
+const Instagram = createLucideIcon("Instagram", [
+  ["rect", { width: "20", height: "20", x: "2", y: "2", rx: "5", ry: "5" }],
+  ["path", { d: "M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" }],
+  ["line", { x1: "17.5", x2: "17.51", y1: "6.5", y2: "6.5" }],
+]);
 
 import type { DemoWork } from "@/data/discoverWorks";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation/isUuid";
+import { DISCOVER_TYPE_TO_TAG } from "@/lib/discover/discoverTypes";
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache, type CSSProperties } from "react";
 
 type CreatorPageProps = {
   params: Promise<{
@@ -75,26 +93,35 @@ function getPlatformUrl(platform: PlatformItem) {
   return `https://${platform.url}`;
 }
 
+const ARTIST_TYPE_LABELS = [
+  DISCOVER_TYPE_TO_TAG.girl,
+  DISCOVER_TYPE_TO_TAG.boy,
+  DISCOVER_TYPE_TO_TAG.solo,
+] as const;
 
-export default async function CreatorPage({
-  params,
-}: CreatorPageProps) {
-  const { id } = await params;
+function getArtistTypeLabels(
+  tags: string[] | null | undefined,
+) {
+  const tagSet = new Set(tags ?? []);
 
-  if (!isUuid(id)) {
-    notFound();
-  }
+  return ARTIST_TYPE_LABELS.filter(
+    (label) => tagSet.has(label),
+  );
+}
 
-  const supabase = await createClient();
+const getCreator = cache(
+  async (id: string) => {
+    if (!isUuid(id)) {
+      return null;
+    }
 
-  /*
-    Supabase Artist 확인
-  */
-  const { data: dbCreator, error: creatorError } =
-    await supabase
-      .from("creators")
-      .select(
-        `
+    const supabase = await createClient();
+
+    const { data, error } =
+      await supabase
+        .from("creators")
+        .select(
+          `
           id,
           username,
           name,
@@ -111,20 +138,78 @@ export default async function CreatorPage({
           is_curated,
           created_at
         `,
-      )
-      .eq("id", id)
-      .maybeSingle();
+        )
+        .eq("id", id)
+        .maybeSingle();
 
-  if (creatorError) {
-    console.error(
-      "LOAD ARTIST ERROR:",
-      creatorError,
-    );
+    if (error) {
+      console.error(
+        "LOAD ARTIST ERROR:",
+        error,
+      );
+    }
+
+    return data;
+  },
+);
+
+export async function generateMetadata({
+  params,
+}: CreatorPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const creator = await getCreator(id);
+
+  if (!creator) {
+    return {
+      title: "Artist | Kovemu",
+    };
   }
+
+  const title = `${creator.name} | Kovemu`;
+  const description = creator.tagline
+    ? `Discover ${creator.name} on Kovemu. ${creator.tagline}`
+    : `Discover ${creator.name} on Kovemu.`;
+  const image =
+    creator.cover_image ||
+    creator.profile_image ||
+    undefined;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      ...(image
+        ? { images: [{ url: image }] }
+        : {}),
+    },
+    twitter: {
+      card: image
+        ? "summary_large_image"
+        : "summary",
+      title,
+      description,
+      ...(image
+        ? { images: [image] }
+        : {}),
+    },
+  };
+}
+
+
+export default async function CreatorPage({
+  params,
+}: CreatorPageProps) {
+  const { id } = await params;
+
+  const dbCreator = await getCreator(id);
 
   if (!dbCreator) {
     notFound();
   }
+
+  const supabase = await createClient();
 
   const artistId = dbCreator.id;
 
@@ -160,7 +245,10 @@ export default async function CreatorPage({
   const tags =
     dbCreator.tags?.length
       ? dbCreator.tags
-      : [artistCategory];
+      : [];
+
+  const artistTypeLabels =
+    getArtistTypeLabels(tags);
 
   /*
     Artist Links
@@ -378,21 +466,24 @@ export default async function CreatorPage({
 
       {/* Artist Hero */}
       <section className="border-b border-gray-100 bg-gray-950">
-        <div className="relative mx-auto h-[430px] max-w-7xl overflow-hidden">
+        <div className="relative mx-auto h-[330px] max-w-7xl overflow-hidden md:h-[430px]">
           {heroImage && (
   <img
     src={heroImage}
     alt={`${artistName} cover`}
-    className="absolute inset-0 h-full w-full object-cover opacity-65"
-    style={{
-      objectPosition: `${coverPositionX}% ${coverPositionY}%`,
-    }}
+    className="absolute inset-0 h-full w-full object-cover object-[75%_50%] opacity-65 md:[object-position:var(--cover-x)_var(--cover-y)]"
+    style={
+      {
+        "--cover-x": `${coverPositionX}%`,
+        "--cover-y": `${coverPositionY}%`,
+      } as CSSProperties
+    }
   />
 )}
 
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20" />
 
-          <div className="relative flex h-full items-end px-6 py-12 text-white lg:px-10 lg:py-14">
+          <div className="relative flex h-full items-end px-6 py-8 text-white md:py-12 lg:px-10 lg:py-14">
             <div className="max-w-2xl">
               <Link
                 href="/discover"
@@ -401,11 +492,7 @@ export default async function CreatorPage({
                 ← Back to Discover
               </Link>
 
-              <p className="mt-8 text-sm font-bold uppercase tracking-[0.22em] text-fuchsia-300">
-                {artistCategory}
-              </p>
-
-              <div className="mt-3 flex items-center gap-3">
+              <div className="mt-8 flex items-center gap-3">
   {profileImage && (
     <img
       src={profileImage}
@@ -415,13 +502,22 @@ export default async function CreatorPage({
   )}
 
   <div>
-    <h1 className="text-5xl font-black tracking-tight md:text-6xl">
+    <h1 className="text-4xl font-black tracking-tight md:text-6xl">
       {artistName}
     </h1>
 
-                {dbCreator.username && (
+                {(artistTypeLabels.length >
+                  0 ||
+                  dbCreator.username) && (
       <p className="mt-2 text-sm font-semibold text-white/60">
-        @{dbCreator.username}
+        {[
+          ...artistTypeLabels,
+          dbCreator.username
+            ? `@${dbCreator.username}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       </p>
     )}
   </div>
@@ -431,11 +527,54 @@ export default async function CreatorPage({
                 {artistTagline}
               </p>
 
-              {isCurated && (
-  <p className="mt-5 text-xs font-medium text-white/45">
-    Curated by Kovemu
-  </p>
-)}
+              {platforms.length > 0 && (
+                <div className="mt-5 flex flex-wrap items-center gap-2">
+                  {platforms.map(
+                    (platform, index) => {
+                      const name =
+                        getPlatformName(
+                          platform,
+                        );
+                      const url =
+                        getPlatformUrl(
+                          platform,
+                        );
+
+                      if (!url) {
+                        return null;
+                      }
+
+                      const iconName =
+                        name.toLowerCase();
+                      const PlatformIcon =
+                        iconName ===
+                        "youtube"
+                          ? Youtube
+                          : iconName ===
+                              "instagram"
+                            ? Instagram
+                            : ExternalLink;
+
+                      return (
+                        <a
+                          key={`${name}-${index}`}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 rounded-full border border-white/35 bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+                        >
+                          <PlatformIcon
+                            size={16}
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
+                          {name}
+                        </a>
+                      );
+                    },
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -453,17 +592,6 @@ export default async function CreatorPage({
               <p className="mt-5 max-w-3xl whitespace-pre-line text-lg leading-8 text-gray-600">
                 {artistDescription}
               </p>
-
-              <div className="mt-7 flex flex-wrap gap-2">
-                {tags.map((tag: string) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-fuchsia-50 px-4 py-2 text-sm font-semibold text-fuchsia-700"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
             </section>
 
             {/* Featured Works */}
@@ -511,9 +639,8 @@ export default async function CreatorPage({
             </section>
           </div>
 
-          {/* Artist Links */}
           {/* Artist Sidebar */}
-<aside className="space-y-5">
+          <aside className="space-y-5">
   {dbCreator && (
     <ArtistVote
       artistId={artistId}
@@ -522,92 +649,13 @@ export default async function CreatorPage({
     />
   )}
 
-  <div className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-xl font-black text-gray-950">
-                Artist Links
-              </h2>
-
-              {platforms.length > 0 ? (
-                <div className="mt-5 space-y-3">
-                  {platforms.map(
-                    (platform, index) => {
-                      const name =
-                        getPlatformName(
-                          platform,
-                        );
-
-                      const url =
-                        getPlatformUrl(
-                          platform,
-                        );
-
-                      if (url) {
-                        return (
-                          <a
-                            key={`${name}-${index}`}
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-gray-200 px-4 py-3 font-semibold text-gray-700 transition hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-700"
-                          >
-                           <span className="flex items-center gap-3">
-  {name.toLowerCase() === "youtube" ? (
-    <Play
-      size={18}
-      strokeWidth={1.8}
-    />
-  ) : name.toLowerCase() === "instagram" ? (
-    <Camera
-      size={18}
-      strokeWidth={1.8}
-    />
-  ) : (
-    <ExternalLink
-      size={18}
-      strokeWidth={1.8}
-    />
+  {isCurated && (
+    <p className="text-xs leading-5 text-gray-400">
+      This profile is curated by Kovemu
+      using publicly available
+      information.
+    </p>
   )}
-
-  {name}
-</span>
-
-
-<ExternalLink
-  size={16}
-  strokeWidth={1.8}
-/>
-                          </a>
-                        );
-                      }
-
-                      return (
-                        <div
-                          key={`${name}-${index}`}
-                          className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 font-semibold text-gray-500"
-                        >
-                          <span>
-                            {name}
-                          </span>
-                        </div>
-                      );
-                    },
-                  )}
-                </div>
-              ) : (
-                <p className="mt-5 text-sm leading-6 text-gray-500">
-                  No external links
-                  available yet.
-                </p>
-              )}
-
-              {isCurated && (
-                <p className="mt-6 border-t border-gray-100 pt-5 text-xs leading-5 text-gray-400">
-                  This profile is curated
-                  by Kovemu using publicly
-                  available information.
-                </p>
-              )}
-            </div>
           </aside>
         </div>
 
