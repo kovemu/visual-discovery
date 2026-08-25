@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   useEffect,
@@ -12,6 +12,7 @@ import {
 
 import AuthModal from "@/components/AuthModal";
 import { createClient } from "@/lib/supabase/client";
+import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 import LogoutButton from "@/components/LogoutButton";
 
 type SearchArtist = {
@@ -42,6 +43,10 @@ export default function Header() {
   );
   const searchRef =
     useRef<HTMLDivElement>(null);
+  const mobileSearchRef =
+    useRef<HTMLDivElement>(null);
+  const mobileSearchInputRef =
+    useRef<HTMLInputElement>(null);
 
   const [
     userEmail,
@@ -70,6 +75,26 @@ export default function Header() {
     dropdownOpen,
     setDropdownOpen,
   ] = useState(false);
+  const [
+    mobileSearchOpen,
+    setMobileSearchOpen,
+  ] = useState(false);
+
+  function closeMobileSearchFromHistory() {
+    setMobileSearchOpen(false);
+    setDropdownOpen(false);
+    setQuery("");
+    setResults([]);
+  }
+
+  const {
+    requestClose:
+      requestCloseMobileSearch,
+  } = useOverlayHistory(
+    "search",
+    mobileSearchOpen,
+    closeMobileSearchFromHistory,
+  );
 
   useEffect(() => {
     async function loadUser() {
@@ -166,9 +191,15 @@ export default function Header() {
     function handlePointerDown(
       event: MouseEvent,
     ) {
+      const target =
+        event.target as Node;
+
       if (
         !searchRef.current?.contains(
-          event.target as Node,
+          target,
+        ) &&
+        !mobileSearchRef.current?.contains(
+          target,
         )
       ) {
         setDropdownOpen(false);
@@ -179,6 +210,11 @@ export default function Header() {
       event: KeyboardEvent,
     ) {
       if (event.key === "Escape") {
+        if (mobileSearchOpen) {
+          requestCloseMobileSearch();
+          return;
+        }
+
         setDropdownOpen(false);
       }
     }
@@ -202,17 +238,72 @@ export default function Header() {
         handleKeyDown,
       );
     };
-  }, []);
+  }, [
+    mobileSearchOpen,
+    requestCloseMobileSearch,
+  ]);
+
+  useEffect(() => {
+    if (
+      !mobileSearchOpen ||
+      !mobileSearchInputRef.current
+    ) {
+      return;
+    }
+
+    mobileSearchInputRef.current.focus();
+  }, [mobileSearchOpen]);
+
+  function openMobileSearch() {
+    setMobileSearchOpen(true);
+
+    if (query.trim().length >= 2) {
+      setDropdownOpen(true);
+    }
+  }
 
   function selectArtist(
     artistId: string,
   ) {
+    const wasMobileSearchOpen =
+      mobileSearchOpen;
+
     setQuery("");
     setResults([]);
     setDropdownOpen(false);
+    setMobileSearchOpen(false);
+
+    if (wasMobileSearchOpen) {
+      router.replace(
+        `/creator/${artistId}`,
+      );
+      return;
+    }
+
     router.push(
       `/creator/${artistId}`,
     );
+  }
+
+  function handleSearchChange(
+    value: string,
+  ) {
+    setQuery(value);
+    setDropdownOpen(true);
+  }
+
+  function handleSearchKeyDown(
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ) {
+    if (
+      event.key === "Enter" &&
+      results.length > 0
+    ) {
+      event.preventDefault();
+      selectArtist(
+        results[0].id,
+      );
+    }
   }
 
   const trimmedQuery =
@@ -221,9 +312,75 @@ export default function Header() {
     dropdownOpen &&
     trimmedQuery.length >= 2;
 
+  const searchDropdown = (
+    <div className="absolute top-full z-[60] mt-2 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+      {searchLoading ? (
+        <p className="px-4 py-3 text-sm text-gray-400">
+          Searching...
+        </p>
+      ) : results.length ===
+        0 ? (
+        <p className="px-4 py-3 text-sm text-gray-400">
+          No artists found.
+        </p>
+      ) : (
+        <ul>
+          {results.map(
+            (artist) => (
+              <li
+                key={
+                  artist.id
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    selectArtist(
+                      artist.id,
+                    )
+                  }
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-gray-50"
+                >
+                  {artist.profile_image ? (
+                    <img
+                      src={
+                        artist.profile_image
+                      }
+                      alt=""
+                      className="h-9 w-9 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                      {getInitials(
+                        artist.name,
+                      )}
+                    </div>
+                  )}
+
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-gray-950">
+                      {
+                        artist.name
+                      }
+                    </p>
+                    <p className="truncate text-xs text-gray-400">
+                      {
+                        artist.category
+                      }
+                    </p>
+                  </div>
+                </button>
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+    </div>
+  );
+
   return (
     <header className="border-b border-gray-200 bg-white">
-      <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-6 lg:px-10">
+      <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between gap-3 px-4 md:gap-4 md:px-6 lg:px-10">
         {/* Logo */}
         <Link
           href="/"
@@ -233,8 +390,22 @@ export default function Header() {
         </Link>
 
         {/* Right */}
-        <div className="flex items-center gap-4">
-          {/* Search */}
+        <div className="flex shrink-0 items-center gap-2 md:gap-4">
+          <button
+            type="button"
+            aria-label="Open search"
+            aria-expanded={
+              mobileSearchOpen
+            }
+            onClick={
+              openMobileSearch
+            }
+            className="flex h-11 w-11 shrink-0 items-center justify-center text-gray-700 transition hover:text-fuchsia-600 active:text-fuchsia-600 md:hidden"
+          >
+            <Search size={20} />
+          </button>
+
+          {/* Desktop search */}
           <div
             ref={searchRef}
             className="relative hidden w-[260px] md:block"
@@ -252,105 +423,27 @@ export default function Header() {
               <input
                 type="search"
                 value={query}
-                onChange={(event) => {
-                  setQuery(
+                onChange={(event) =>
+                  handleSearchChange(
                     event.target
                       .value,
-                  );
-                  setDropdownOpen(
-                    true,
-                  );
-                }}
+                  )
+                }
                 onFocus={() =>
                   setDropdownOpen(
                     true,
                   )
                 }
-                onKeyDown={(
-                  event,
-                ) => {
-                  if (
-                    event.key ===
-                      "Enter" &&
-                    results.length >
-                      0
-                  ) {
-                    event.preventDefault();
-                    selectArtist(
-                      results[0].id,
-                    );
-                  }
-                }}
+                onKeyDown={
+                  handleSearchKeyDown
+                }
                 placeholder="Search artists"
                 className="h-10 w-full rounded-full border border-gray-200 bg-gray-50 pl-10 pr-4 text-sm outline-none transition focus:border-fuchsia-300"
               />
             </label>
 
-            {showDropdown && (
-              <div className="absolute top-full z-50 mt-2 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
-                {searchLoading ? (
-                  <p className="px-4 py-3 text-sm text-gray-400">
-                    Searching...
-                  </p>
-                ) : results.length ===
-                  0 ? (
-                  <p className="px-4 py-3 text-sm text-gray-400">
-                    No artists found.
-                  </p>
-                ) : (
-                  <ul>
-                    {results.map(
-                      (artist) => (
-                        <li
-                          key={
-                            artist.id
-                          }
-                        >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              selectArtist(
-                                artist.id,
-                              )
-                            }
-                            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-gray-50"
-                          >
-                            {artist.profile_image ? (
-                              <img
-                                src={
-                                  artist.profile_image
-                                }
-                                alt=""
-                                className="h-9 w-9 shrink-0 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
-                                {getInitials(
-                                  artist.name,
-                                )}
-                              </div>
-                            )}
-
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-gray-950">
-                                {
-                                  artist.name
-                                }
-                              </p>
-                              <p className="truncate text-xs text-gray-400">
-                                {
-                                  artist.category
-                                }
-                              </p>
-                            </div>
-                          </button>
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                )}
-              </div>
-            )}
+            {showDropdown &&
+              searchDropdown}
           </div>
 
           {/* Auth */}
@@ -378,6 +471,64 @@ export default function Header() {
             ))}
         </div>
       </div>
+
+      {mobileSearchOpen && (
+        <div
+          ref={mobileSearchRef}
+          className="border-t border-gray-100 bg-white md:hidden"
+        >
+          <div className="relative px-4 py-2.5">
+            <label className="block">
+              <span className="sr-only">
+                Search artists
+              </span>
+
+              <Search
+                size={16}
+                className="pointer-events-none absolute left-7 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+
+              <input
+                ref={
+                  mobileSearchInputRef
+                }
+                type="search"
+                value={query}
+                onChange={(event) =>
+                  handleSearchChange(
+                    event.target
+                      .value,
+                  )
+                }
+                onFocus={() =>
+                  setDropdownOpen(
+                    true,
+                  )
+                }
+                onKeyDown={
+                  handleSearchKeyDown
+                }
+                placeholder="Search artists"
+                className="h-11 w-full rounded-full border border-gray-200 bg-gray-50 pl-10 pr-11 text-sm outline-none transition focus:border-fuchsia-300"
+              />
+            </label>
+
+            <button
+              type="button"
+              aria-label="Close search"
+              onClick={
+                requestCloseMobileSearch
+              }
+              className="absolute right-6 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+            >
+              <X size={16} />
+            </button>
+
+            {showDropdown &&
+              searchDropdown}
+          </div>
+        </div>
+      )}
 
       <AuthModal
         open={showAuthModal}

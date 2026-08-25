@@ -20,6 +20,7 @@ type AuthModalProps = {
   onClose: () => void;
   onSuccess?: () => void;
   initialMode?: "login" | "signup";
+  replaceOnSuccess?: boolean;
 };
 
 export default function AuthModal({
@@ -27,6 +28,7 @@ export default function AuthModal({
   onClose,
   onSuccess,
   initialMode = "login",
+  replaceOnSuccess = false,
 }: AuthModalProps) {
   const router = useRouter();
   const [mode, setMode] =
@@ -34,7 +36,9 @@ export default function AuthModal({
       initialMode,
     );
   const afterHistoryCloseRef =
-    useRef<(() => void) | null>(null);
+    useRef<(() => void) | null>(
+      null,
+    );
 
   const { requestClose } =
     useOverlayHistory(
@@ -46,9 +50,7 @@ export default function AuthModal({
           afterHistoryCloseRef.current;
         afterHistoryCloseRef.current =
           null;
-        if (after) {
-          queueMicrotask(after);
-        }
+        after?.();
       },
     );
 
@@ -99,10 +101,14 @@ export default function AuthModal({
   }
 
   function handleSuccess() {
+    if (replaceOnSuccess) {
+      onClose();
+      onSuccess?.();
+      return;
+    }
+
     afterHistoryCloseRef.current =
-      () => {
-        onSuccess?.();
-      };
+      onSuccess ?? null;
     requestClose();
   }
 

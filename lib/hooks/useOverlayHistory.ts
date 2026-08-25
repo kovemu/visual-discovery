@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-export type OverlayId = "work" | "picks" | "auth";
+export type OverlayId =
+  | "work"
+  | "picks"
+  | "auth"
+  | "search";
 
 const STACK_KEY = "kovemuOverlayStack";
 
@@ -20,7 +24,8 @@ function isOverlayId(value: unknown): value is OverlayId {
   return (
     value === "work" ||
     value === "picks" ||
-    value === "auth"
+    value === "auth" ||
+    value === "search"
   );
 }
 

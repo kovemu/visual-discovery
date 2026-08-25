@@ -16,10 +16,7 @@ import {
 
 import AuthModal from "@/components/AuthModal";
 import { createClient } from "@/lib/supabase/client";
-import {
-  consumeAllOverlayHistory,
-  useOverlayHistory,
-} from "@/lib/hooks/useOverlayHistory";
+import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 
 type PickPanelWork = {
   id: string;
@@ -81,7 +78,6 @@ type MyPicksPanelProps = {
   onMobileOpenChange?: (
     open: boolean,
   ) => void;
-  plusOneKey?: number;
 };
 
 function mapPickedWork(
@@ -219,7 +215,6 @@ export default function MyPicksPanel({
   onWorkClick,
   mobileOpen = false,
   onMobileOpenChange,
-  plusOneKey = 0,
 }: MyPicksPanelProps) {
   const router = useRouter();
   const supabase = useMemo(
@@ -675,8 +670,19 @@ function changeFilter(
 
   function handleViewAllClick() {
     if (isAuthenticated) {
+      const fromMobileDrawer =
+        Boolean(
+          mobileOpen &&
+            onMobileOpenChange,
+        );
+
       closeMobileDrawerFromHistory();
-      consumeAllOverlayHistory();
+
+      if (fromMobileDrawer) {
+        router.replace("/me");
+        return;
+      }
+
       router.push("/me");
       return;
     }
@@ -1150,11 +1156,18 @@ function changeFilter(
                   <div className="flex items-center justify-between gap-3">
                     <Link
                       href={`/creator/${artist.artistId}`}
-                      className="min-w-0 truncate text-sm font-bold text-gray-950 transition hover:text-fuchsia-600"
+                      className="inline-flex min-w-0 items-center gap-1 text-sm font-bold text-gray-950 transition hover:text-fuchsia-600"
                     >
-                      {
-                        artist.artistName
-                      }
+                      <span className="truncate">
+                        {
+                          artist.artistName
+                        }
+                      </span>
+                      <ChevronRight
+                        size={14}
+                        className="shrink-0 text-gray-400 xl:hidden"
+                        aria-hidden="true"
+                      />
                     </Link>
 
                     <span className="shrink-0 text-[11px] font-semibold text-gray-400">
@@ -1423,10 +1436,12 @@ function changeFilter(
           onPointerMove={onHandlePointerMove}
           onPointerUp={onHandlePointerUp}
           onPointerCancel={onHandlePointerUp}
-          className={`fixed right-0 top-1/2 z-[52] flex h-[84px] w-12 -translate-y-1/2 translate-x-1 touch-none items-center justify-center rounded-l-2xl border border-r-0 border-gray-200/80 bg-white/75 shadow-[-2px_0_10px_rgba(0,0,0,0.06)] backdrop-blur-[2px] transition-opacity duration-200 xl:hidden ${
+          className={`fixed right-0 top-1/2 z-[52] flex h-[84px] w-12 -translate-y-1/2 translate-x-1 touch-none items-center justify-center rounded-l-2xl border border-r-0 backdrop-blur-[2px] transition-[border-color,box-shadow,opacity] duration-200 xl:hidden ${
             mobileOpen
               ? "pointer-events-none opacity-0"
-              : "opacity-100"
+              : showAdded
+                ? "border-fuchsia-300/80 bg-white/90 opacity-100 shadow-[0_0_22px_rgba(217,70,239,0.38)]"
+                : "border-gray-200/80 bg-white/75 opacity-100 shadow-[-2px_0_10px_rgba(0,0,0,0.06)]"
           }`}
         >
           <span
@@ -1438,13 +1453,19 @@ function changeFilter(
             <span className="absolute bottom-[6px] left-[10px] h-3 w-3.5 rounded-[3px] border border-gray-400 bg-gray-50 shadow-[0_1px_3px_rgba(0,0,0,0.08)]" />
           </span>
 
-          {plusOneKey > 0 && (
-            <span
-              key={plusOneKey}
-              className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 animate-[pickPulse_0.65s_ease-out_forwards] whitespace-nowrap text-sm font-bold text-fuchsia-500"
-            >
-              +1
-            </span>
+          {!mobileOpen && showAdded && (
+            <>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-l-2xl bg-fuchsia-400/15"
+              />
+              <span
+                key={pulseKey}
+                className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 animate-[pickPulse_0.75s_ease-out_forwards] whitespace-nowrap text-sm font-bold text-fuchsia-500"
+              >
+                +{addedCount}
+              </span>
+            </>
           )}
         </button>
 
@@ -1519,10 +1540,22 @@ function changeFilter(
         setShowAuthModal(false)
       }
       onSuccess={() => {
+        const fromMobileDrawer =
+          Boolean(
+            mobileOpen &&
+              onMobileOpenChange,
+          );
+
         closeMobileDrawerFromHistory();
-        consumeAllOverlayHistory();
+
+        if (fromMobileDrawer) {
+          router.replace("/me");
+          return;
+        }
+
         router.push("/me");
       }}
+      replaceOnSuccess
     />
     </>
   );

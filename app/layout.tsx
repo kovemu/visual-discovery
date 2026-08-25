@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Kovemu | Discover K-pop Artists",
+  title: "Kovemu | Discover Your Next K-pop Artist",
   description:
     "Discover rising K-pop artists through performances, fancams, and visual highlights.",
 };

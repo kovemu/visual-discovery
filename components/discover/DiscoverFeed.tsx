@@ -994,10 +994,6 @@ const [
   mobilePicksOpen,
   setMobilePicksOpen,
 ] = useState(false);
-const [
-  mobilePickPlusOneKey,
-  setMobilePickPlusOneKey,
-] = useState(0);
   const [pendingPickWork, setPendingPickWork] =
   useState<FeedItem | null>(null);
   const [showLogin, setShowLogin] =
@@ -2077,10 +2073,6 @@ const [
     return;
   }
 
-  setMobilePickPlusOneKey(
-    (current) => current + 1,
-  );
-
   setPickPanelRefreshKey(
     (current) => current + 1,
   );
@@ -2551,7 +2543,6 @@ function openPickedWork(
   onWorkClick={openPickedWork}
   mobileOpen={mobilePicksOpen}
   onMobileOpenChange={setMobilePicksOpen}
-  plusOneKey={mobilePickPlusOneKey}
 />
       {selectedWork && (
         <div
