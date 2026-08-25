@@ -7,6 +7,7 @@ import type { MutableRefObject } from "react";
 import AuthModal from "@/components/AuthModal";
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
 import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
+import { consumeAllOverlayHistory, useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 import {
   DISCOVER_TYPE_TO_TAG,
   DISCOVER_TYPES,
@@ -1017,10 +1018,6 @@ const [
   const [isInitializing, setIsInitializing] =
     useState(true);
   const [selectedWork, setSelectedWork] = useState<FeedItem | null>(null);
-  const modalHistoryEntryRef = useRef(false);
-  const selectedWorkRef = useRef<FeedItem | null>(null);
-  const ignoreNextPopstateRef = useRef(false);
-  selectedWorkRef.current = selectedWork;
   const [pickedWorkIds, setPickedWorkIds] = useState<Set<string>>(new Set());
   const [transitionStage, setTransitionStage] =
     useState<TransitionStage>("idle");
@@ -1715,54 +1712,23 @@ const [
     };
   }, []);
 
-  useEffect(() => {
-    function onPopState() {
-      if (ignoreNextPopstateRef.current) {
-        ignoreNextPopstateRef.current = false;
-        return;
-      }
+  function closeWorkModalFromHistory() {
+    setSelectedWork(null);
 
-      if (
-        !modalHistoryEntryRef.current &&
-        !selectedWorkRef.current
-      ) {
-        return;
-      }
-
-      modalHistoryEntryRef.current = false;
-      setSelectedWork(null);
-      setPickPanelRefreshKey(
-        (current) => current + 1,
-      );
-    }
-
-    window.addEventListener(
-      "popstate",
-      onPopState,
+    setPickPanelRefreshKey(
+      (current) => current + 1,
     );
+  }
 
-    return () => {
-      window.removeEventListener(
-        "popstate",
-        onPopState,
-      );
-    };
-  }, []);
+  const { requestClose: requestCloseWorkModal } =
+    useOverlayHistory(
+      "work",
+      selectedWork !== null,
+      closeWorkModalFromHistory,
+    );
 
   useEffect(() => {
     if (!selectedWork) return;
-
-    if (!modalHistoryEntryRef.current) {
-      window.history.pushState(
-        {
-          ...(window.history.state ?? {}),
-          kovemuWorkModal: true,
-        },
-        "",
-        window.location.href,
-      );
-      modalHistoryEntryRef.current = true;
-    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -1777,7 +1743,7 @@ const [
       document.body.style.overflow = "";
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [selectedWork]);
+  }, [selectedWork, requestCloseWorkModal]);
 
   async function applyTypeFilterChange(
     nextTypes: DiscoverType[],
@@ -2119,43 +2085,18 @@ const [
     (current) => current + 1,
   );
 }
-function closeWorkModalFromHistory() {
-  modalHistoryEntryRef.current = false;
-  setSelectedWork(null);
-
-  setPickPanelRefreshKey(
-    (current) => current + 1,
-  );
-}
-
-function requestCloseWorkModal() {
-  if (modalHistoryEntryRef.current) {
-    window.history.back();
-    return;
-  }
-
-  closeWorkModalFromHistory();
-}
-
 function handleViewArtistProfile(
   event: React.MouseEvent<HTMLAnchorElement>,
   artistId: string,
 ) {
   event.preventDefault();
 
-  const hadHistoryEntry =
-    modalHistoryEntryRef.current;
-
-  modalHistoryEntryRef.current = false;
   setSelectedWork(null);
+  setMobilePicksOpen(false);
   setPickPanelRefreshKey(
     (current) => current + 1,
   );
-
-  if (hadHistoryEntry) {
-    ignoreNextPopstateRef.current = true;
-    window.history.back();
-  }
+  consumeAllOverlayHistory();
 
   router.push(
     `/creator/${artistId}`,

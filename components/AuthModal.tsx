@@ -1,12 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useEffect,
+  useRef,
   useState,
+  type MouseEvent,
 } from "react";
 
 import LoginForm from "@/components/LoginForm";
+import {
+  consumeAllOverlayHistory,
+  useOverlayHistory,
+} from "@/lib/hooks/useOverlayHistory";
 
 type AuthModalProps = {
   open: boolean;
@@ -21,9 +28,28 @@ export default function AuthModal({
   onSuccess,
   initialMode = "login",
 }: AuthModalProps) {
+  const router = useRouter();
   const [mode, setMode] =
     useState<"login" | "signup">(
       initialMode,
+    );
+  const afterHistoryCloseRef =
+    useRef<(() => void) | null>(null);
+
+  const { requestClose } =
+    useOverlayHistory(
+      "auth",
+      open,
+      () => {
+        onClose();
+        const after =
+          afterHistoryCloseRef.current;
+        afterHistoryCloseRef.current =
+          null;
+        if (after) {
+          queueMicrotask(after);
+        }
+      },
     );
 
   useEffect(() => {
@@ -41,7 +67,7 @@ export default function AuthModal({
       event: KeyboardEvent,
     ) => {
       if (event.key === "Escape") {
-        onClose();
+        requestClose();
       }
     };
 
@@ -61,7 +87,24 @@ export default function AuthModal({
         handleKeyDown,
       );
     };
-  }, [open, onClose]);
+  }, [open, requestClose]);
+
+  function handleHomeClick(
+    event: MouseEvent<HTMLAnchorElement>,
+  ) {
+    event.preventDefault();
+    onClose();
+    consumeAllOverlayHistory();
+    router.push("/");
+  }
+
+  function handleSuccess() {
+    afterHistoryCloseRef.current =
+      () => {
+        onSuccess?.();
+      };
+    requestClose();
+  }
 
   if (!open) {
     return null;
@@ -70,7 +113,7 @@ export default function AuthModal({
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
         className="relative max-h-[90vh] w-full max-w-[440px] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl sm:p-8"
@@ -83,7 +126,7 @@ export default function AuthModal({
       >
         <button
           type="button"
-          onClick={onClose}
+          onClick={requestClose}
           aria-label="Close auth modal"
           className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full text-xl text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
         >
@@ -93,7 +136,7 @@ export default function AuthModal({
         <div className="mb-6 pt-2 text-center">
           <Link
             href="/"
-            onClick={onClose}
+            onClick={handleHomeClick}
             className="inline-block text-[30px] font-black leading-none text-fuchsia-600 transition hover:text-fuchsia-700"
           >
             Kovemu
@@ -104,10 +147,7 @@ export default function AuthModal({
           mode={mode}
           presentation="modal"
           onModeChange={setMode}
-          onSuccess={() => {
-            onSuccess?.();
-            onClose();
-          }}
+          onSuccess={handleSuccess}
         />
       </div>
     </div>

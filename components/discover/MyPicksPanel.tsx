@@ -16,6 +16,10 @@ import {
 
 import AuthModal from "@/components/AuthModal";
 import { createClient } from "@/lib/supabase/client";
+import {
+  consumeAllOverlayHistory,
+  useOverlayHistory,
+} from "@/lib/hooks/useOverlayHistory";
 
 type PickPanelWork = {
   id: string;
@@ -671,6 +675,8 @@ function changeFilter(
 
   function handleViewAllClick() {
     if (isAuthenticated) {
+      closeMobileDrawerFromHistory();
+      consumeAllOverlayHistory();
       router.push("/me");
       return;
     }
@@ -682,13 +688,20 @@ function changeFilter(
     onMobileOpenChange?.(true);
   }
 
-  function closeMobileDrawer() {
+  function closeMobileDrawerFromHistory() {
     cardScrubRef.current = null;
     closeZoneSwipeRef.current = null;
     setScrubArtistId(null);
     setScrubWorkId(null);
     onMobileOpenChange?.(false);
   }
+
+  const { requestClose: requestCloseMobileDrawer } =
+    useOverlayHistory(
+      "picks",
+      Boolean(mobileOpen && onMobileOpenChange),
+      closeMobileDrawerFromHistory,
+    );
 
   function resetCardScrub() {
     cardScrubRef.current = null;
@@ -784,7 +797,7 @@ function changeFilter(
       return;
     }
 
-    closeMobileDrawer();
+    requestCloseMobileDrawer();
   }
 
   function onCloseZonePointerDown(
@@ -880,7 +893,7 @@ function changeFilter(
     ) {
       ignoreCloseHandleTapRef.current =
         true;
-      closeMobileDrawer();
+      requestCloseMobileDrawer();
       return;
     }
 
@@ -1441,7 +1454,7 @@ function changeFilter(
               ? "opacity-100"
               : "pointer-events-none opacity-0"
           }`}
-          onClick={closeMobileDrawer}
+          onClick={requestCloseMobileDrawer}
           aria-hidden={!mobileOpen}
         />
 
@@ -1506,6 +1519,8 @@ function changeFilter(
         setShowAuthModal(false)
       }
       onSuccess={() => {
+        closeMobileDrawerFromHistory();
+        consumeAllOverlayHistory();
         router.push("/me");
       }}
     />
