@@ -1,6 +1,7 @@
 "use client";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import AuthModal from "@/components/AuthModal";
@@ -968,6 +969,7 @@ function mergeUniqueWorks(
 }
 
 export default function DiscoverFeed({ works }: DiscoverFeedProps) {
+    const router = useRouter();
     const supabase = useMemo(
     () => createClient(),
     [],
@@ -1015,6 +1017,10 @@ const [
   const [isInitializing, setIsInitializing] =
     useState(true);
   const [selectedWork, setSelectedWork] = useState<FeedItem | null>(null);
+  const modalHistoryEntryRef = useRef(false);
+  const selectedWorkRef = useRef<FeedItem | null>(null);
+  const ignoreNextPopstateRef = useRef(false);
+  selectedWorkRef.current = selectedWork;
   const [pickedWorkIds, setPickedWorkIds] = useState<Set<string>>(new Set());
   const [transitionStage, setTransitionStage] =
     useState<TransitionStage>("idle");
@@ -1710,17 +1716,59 @@ const [
   }, []);
 
   useEffect(() => {
+    function onPopState() {
+      if (ignoreNextPopstateRef.current) {
+        ignoreNextPopstateRef.current = false;
+        return;
+      }
+
+      if (
+        !modalHistoryEntryRef.current &&
+        !selectedWorkRef.current
+      ) {
+        return;
+      }
+
+      modalHistoryEntryRef.current = false;
+      setSelectedWork(null);
+      setPickPanelRefreshKey(
+        (current) => current + 1,
+      );
+    }
+
+    window.addEventListener(
+      "popstate",
+      onPopState,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "popstate",
+        onPopState,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedWork) return;
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-  if (event.key === "Escape") {
-    setSelectedWork(null);
+    if (!modalHistoryEntryRef.current) {
+      window.history.pushState(
+        {
+          ...(window.history.state ?? {}),
+          kovemuWorkModal: true,
+        },
+        "",
+        window.location.href,
+      );
+      modalHistoryEntryRef.current = true;
+    }
 
-    setPickPanelRefreshKey(
-      (current) => current + 1,
-    );
-  }
-};
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        requestCloseWorkModal();
+      }
+    };
 
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", handleKeyDown);
@@ -2071,11 +2119,46 @@ const [
     (current) => current + 1,
   );
 }
-function closeWorkModal() {
+function closeWorkModalFromHistory() {
+  modalHistoryEntryRef.current = false;
   setSelectedWork(null);
 
   setPickPanelRefreshKey(
     (current) => current + 1,
+  );
+}
+
+function requestCloseWorkModal() {
+  if (modalHistoryEntryRef.current) {
+    window.history.back();
+    return;
+  }
+
+  closeWorkModalFromHistory();
+}
+
+function handleViewArtistProfile(
+  event: React.MouseEvent<HTMLAnchorElement>,
+  artistId: string,
+) {
+  event.preventDefault();
+
+  const hadHistoryEntry =
+    modalHistoryEntryRef.current;
+
+  modalHistoryEntryRef.current = false;
+  setSelectedWork(null);
+  setPickPanelRefreshKey(
+    (current) => current + 1,
+  );
+
+  if (hadHistoryEntry) {
+    ignoreNextPopstateRef.current = true;
+    window.history.back();
+  }
+
+  router.push(
+    `/creator/${artistId}`,
   );
 }
 
@@ -2534,7 +2617,7 @@ function openPickedWork(
       {selectedWork && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-4"
-          onClick={closeWorkModal}
+          onClick={requestCloseWorkModal}
         >
           <div
             className="relative flex h-[calc(100dvh-24px)] max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-none flex-col overflow-hidden rounded-2xl bg-white md:h-auto md:max-h-[80vh] md:w-full md:max-w-4xl md:flex-row"
@@ -2568,7 +2651,7 @@ function openPickedWork(
             <aside className="relative w-full shrink-0 bg-white px-4 py-3.5 md:w-[300px] md:p-6">
               <button
                 type="button"
-                onClick={closeWorkModal}
+                onClick={requestCloseWorkModal}
                 aria-label="Close work"
                 className="absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-gray-100 text-lg text-gray-600 transition hover:bg-gray-200 hover:text-gray-950 md:right-4 md:top-4"
               >
@@ -2604,6 +2687,12 @@ function openPickedWork(
 
               <Link
                 href={`/creator/${selectedWork.artistId}`}
+                onClick={(event) =>
+                  handleViewArtistProfile(
+                    event,
+                    selectedWork.artistId,
+                  )
+                }
                 className="mt-2 flex h-11 w-full cursor-pointer items-center justify-center rounded-full bg-gray-950 px-5 text-sm font-bold text-white transition hover:bg-gray-800 md:mt-3"
               >
                 View Artist Profile
