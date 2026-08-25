@@ -237,7 +237,10 @@ export default function MyPicksPanel({
     startX: number;
     startY: number;
     captured: boolean;
+    moved: boolean;
   } | null>(null);
+  const ignoreCloseHandleTapRef =
+    useRef(false);
   const cardScrubRef = useRef<{
     pointerId: number;
     startX: number;
@@ -325,6 +328,7 @@ export default function MyPicksPanel({
     useState<string | null>(
       null,
     );
+
 function changeFilter(
   nextFilter:
     | "today"
@@ -773,23 +777,37 @@ function changeFilter(
     openMobileDrawer();
   }
 
+  function onCloseHandleClick() {
+    if (ignoreCloseHandleTapRef.current) {
+      ignoreCloseHandleTapRef.current =
+        false;
+      return;
+    }
+
+    closeMobileDrawer();
+  }
+
   function onCloseZonePointerDown(
-    event: ReactPointerEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLElement>,
   ) {
     if (!mobileOpen) {
       return;
     }
+
+    ignoreCloseHandleTapRef.current =
+      false;
 
     closeZoneSwipeRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       captured: false,
+      moved: false,
     };
   }
 
   function onCloseZonePointerMove(
-    event: ReactPointerEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLElement>,
   ) {
     const state = closeZoneSwipeRef.current;
 
@@ -802,6 +820,13 @@ function changeFilter(
 
     const dx = event.clientX - state.startX;
     const dy = event.clientY - state.startY;
+
+    if (
+      Math.abs(dx) > 10 ||
+      Math.abs(dy) > 10
+    ) {
+      state.moved = true;
+    }
 
     if (
       state.captured ||
@@ -822,7 +847,7 @@ function changeFilter(
   }
 
   function onCloseZonePointerUp(
-    event: ReactPointerEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLElement>,
   ) {
     const state = closeZoneSwipeRef.current;
 
@@ -853,7 +878,15 @@ function changeFilter(
       Math.abs(dx) >
         Math.abs(dy) * 1.2
     ) {
+      ignoreCloseHandleTapRef.current =
+        true;
       closeMobileDrawer();
+      return;
+    }
+
+    if (state.moved) {
+      ignoreCloseHandleTapRef.current =
+        true;
     }
   }
 
@@ -1420,8 +1453,8 @@ function changeFilter(
           }`}
         >
           <div
-            aria-hidden="true"
-            className="absolute inset-y-0 left-0 z-10 w-8 touch-none"
+            aria-label="Swipe right to close My Picks"
+            className="group/closezone absolute inset-y-0 left-0 z-10 w-14 touch-none"
             onPointerDown={
               onCloseZonePointerDown
             }
@@ -1434,9 +1467,33 @@ function changeFilter(
             onPointerCancel={
               onCloseZonePointerUp
             }
-          />
+          >
+            <button
+              type="button"
+              aria-label="Close My Picks"
+              onClick={onCloseHandleClick}
+              onPointerDown={
+                onCloseZonePointerDown
+              }
+              onPointerMove={
+                onCloseZonePointerMove
+              }
+              onPointerUp={
+                onCloseZonePointerUp
+              }
+              onPointerCancel={
+                onCloseZonePointerUp
+              }
+              className="pointer-events-auto absolute left-0 top-1/2 flex h-[72px] w-[34px] -translate-x-[10%] -translate-y-1/2 touch-none items-center justify-center rounded-l-sm rounded-r-full border border-l-0 border-gray-300 bg-white/95 shadow-md transition-transform duration-150 active:scale-[0.96] group-active/closezone:scale-[0.96]"
+            >
+              <ChevronRight
+                size={20}
+                className="relative text-gray-600 transition-colors duration-150 active:text-fuchsia-600 group-active/closezone:text-fuchsia-600"
+              />
+            </button>
+          </div>
 
-          <div className="relative h-full touch-pan-y overflow-x-hidden overflow-y-auto pb-10 pl-8 pr-5 pt-7">
+          <div className="relative h-full touch-pan-y overflow-x-hidden overflow-y-auto pb-10 pl-14 pr-5 pt-7">
             {picksPanelContent}
           </div>
         </div>
