@@ -9,7 +9,9 @@ import { useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import AuthModal from "@/components/AuthModal";
@@ -75,6 +77,7 @@ type MyPicksPanelProps = {
   onMobileOpenChange?: (
     open: boolean,
   ) => void;
+  plusOneKey?: number;
 };
 
 function mapPickedWork(
@@ -140,6 +143,51 @@ function getThumbnail(
   return "";
 }
 
+function isCoarsePointer(
+  event: ReactPointerEvent,
+) {
+  return (
+    event.pointerType === "touch" ||
+    event.pointerType === "pen"
+  );
+}
+
+function hitTestPickCardId(
+  clientX: number,
+  clientY: number,
+  artistId: string,
+) {
+  const nodes =
+    document.elementsFromPoint(
+      clientX,
+      clientY,
+    );
+
+  for (const node of nodes) {
+    if (!(node instanceof Element)) {
+      continue;
+    }
+
+    const card = node.closest(
+      "[data-pick-card-id]",
+    );
+
+    if (!(card instanceof HTMLElement)) {
+      continue;
+    }
+
+    if (
+      card.dataset.pickStack !== artistId
+    ) {
+      continue;
+    }
+
+    return card.dataset.pickCardId ?? null;
+  }
+
+  return null;
+}
+
 function isToday(
   dateString: string,
 ) {
@@ -167,6 +215,7 @@ export default function MyPicksPanel({
   onWorkClick,
   mobileOpen = false,
   onMobileOpenChange,
+  plusOneKey = 0,
 }: MyPicksPanelProps) {
   const router = useRouter();
   const supabase = useMemo(
@@ -176,6 +225,29 @@ export default function MyPicksPanel({
 
   const [open, setOpen] =
     useState(false);
+
+  const handleSwipeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const closeZoneSwipeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    captured: boolean;
+  } | null>(null);
+  const cardScrubRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    artistId: string;
+    mode: "undecided" | "scrub" | "scroll";
+    captured: boolean;
+  } | null>(null);
+  const suppressCardClickRef = useRef(false);
+  const ignoreHandleClickRef = useRef(false);
 
   const [
     isAuthenticated,
@@ -233,6 +305,22 @@ export default function MyPicksPanel({
   const [
     hoveredArtistId,
     setHoveredArtistId,
+  ] =
+    useState<string | null>(
+      null,
+    );
+
+  const [
+    scrubArtistId,
+    setScrubArtistId,
+  ] =
+    useState<string | null>(
+      null,
+    );
+
+  const [
+    scrubWorkId,
+    setScrubWorkId,
   ] =
     useState<string | null>(
       null,
@@ -298,6 +386,27 @@ function changeFilter(
       subscription.unsubscribe();
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (!mobileOpen) {
+      cardScrubRef.current = null;
+      closeZoneSwipeRef.current = null;
+      setScrubArtistId(null);
+      setScrubWorkId(null);
+      return;
+    }
+
+    const previousOverflow =
+      document.body.style.overflow;
+
+    document.body.style.overflow =
+      "hidden";
+
+    return () => {
+      document.body.style.overflow =
+        previousOverflow;
+    };
+  }, [mobileOpen]);
 
   /*
     DB에서 Pick 목록 불러오기
@@ -565,6 +674,326 @@ function changeFilter(
     setShowAuthModal(true);
   }
 
+  function openMobileDrawer() {
+    onMobileOpenChange?.(true);
+  }
+
+  function closeMobileDrawer() {
+    cardScrubRef.current = null;
+    closeZoneSwipeRef.current = null;
+    setScrubArtistId(null);
+    setScrubWorkId(null);
+    onMobileOpenChange?.(false);
+  }
+
+  function resetCardScrub() {
+    cardScrubRef.current = null;
+    setScrubArtistId(null);
+    setScrubWorkId(null);
+  }
+
+  function onHandlePointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    handleSwipeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+    ignoreHandleClickRef.current =
+      false;
+    event.currentTarget.setPointerCapture(
+      event.pointerId,
+    );
+  }
+
+  function onHandlePointerMove(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    const state = handleSwipeRef.current;
+
+    if (
+      !state ||
+      state.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+
+    if (
+      Math.abs(dx) > 10 ||
+      Math.abs(dy) > 10
+    ) {
+      state.moved = true;
+    }
+  }
+
+  function onHandlePointerUp(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    const state = handleSwipeRef.current;
+
+    if (
+      !state ||
+      state.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    handleSwipeRef.current = null;
+
+    if (
+      dx < -48 &&
+      Math.abs(dx) > Math.abs(dy)
+    ) {
+      ignoreHandleClickRef.current =
+        true;
+      openMobileDrawer();
+      return;
+    }
+
+    if (state.moved) {
+      ignoreHandleClickRef.current =
+        true;
+    }
+  }
+
+  function onHandleClick() {
+    if (ignoreHandleClickRef.current) {
+      ignoreHandleClickRef.current =
+        false;
+      return;
+    }
+
+    openMobileDrawer();
+  }
+
+  function onCloseZonePointerDown(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    if (!mobileOpen) {
+      return;
+    }
+
+    closeZoneSwipeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      captured: false,
+    };
+  }
+
+  function onCloseZonePointerMove(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    const state = closeZoneSwipeRef.current;
+
+    if (
+      !state ||
+      state.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+
+    if (
+      state.captured ||
+      !(
+        Math.abs(dx) > 12 &&
+        Math.abs(dx) >
+          Math.abs(dy) * 1.2
+      )
+    ) {
+      return;
+    }
+
+    state.captured = true;
+
+    event.currentTarget.setPointerCapture(
+      event.pointerId,
+    );
+  }
+
+  function onCloseZonePointerUp(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    const state = closeZoneSwipeRef.current;
+
+    if (
+      !state ||
+      state.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+
+    if (state.captured) {
+      try {
+        event.currentTarget.releasePointerCapture(
+          event.pointerId,
+        );
+      } catch {
+        // pointer already released
+      }
+    }
+
+    closeZoneSwipeRef.current = null;
+
+    if (
+      dx > 56 &&
+      Math.abs(dx) >
+        Math.abs(dy) * 1.2
+    ) {
+      closeMobileDrawer();
+    }
+  }
+
+  function onStackPointerDown(
+    event: ReactPointerEvent<HTMLDivElement>,
+    artistId: string,
+  ) {
+    if (!isCoarsePointer(event)) {
+      return;
+    }
+
+    suppressCardClickRef.current = true;
+    cardScrubRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      artistId,
+      mode: "undecided",
+      captured: false,
+    };
+  }
+
+  function onStackPointerMove(
+    event: ReactPointerEvent<HTMLDivElement>,
+    artistId: string,
+  ) {
+    const state = cardScrubRef.current;
+
+    if (
+      !state ||
+      state.pointerId !== event.pointerId ||
+      state.artistId !== artistId ||
+      state.mode === "scroll"
+    ) {
+      return;
+    }
+
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (state.mode === "undecided") {
+      if (Math.max(absDx, absDy) < 8) {
+        return;
+      }
+
+      if (absDy > absDx * 1.15) {
+        state.mode = "scroll";
+        resetCardScrub();
+        return;
+      }
+
+      if (absDx > absDy * 1.15) {
+        state.mode = "scrub";
+        setScrubArtistId(artistId);
+        setScrubWorkId(
+          hitTestPickCardId(
+            event.clientX,
+            event.clientY,
+            artistId,
+          ),
+        );
+        state.captured = true;
+        event.currentTarget.setPointerCapture(
+          event.pointerId,
+        );
+      }
+
+      return;
+    }
+
+    setScrubWorkId(
+      hitTestPickCardId(
+        event.clientX,
+        event.clientY,
+        artistId,
+      ),
+    );
+  }
+
+  function onStackPointerUp(
+    event: ReactPointerEvent<HTMLDivElement>,
+    artist: PickedArtist,
+  ) {
+    const state = cardScrubRef.current;
+
+    if (
+      !state ||
+      state.pointerId !== event.pointerId ||
+      state.artistId !== artist.artistId
+    ) {
+      return;
+    }
+
+    if (state.captured) {
+      try {
+        event.currentTarget.releasePointerCapture(
+          event.pointerId,
+        );
+      } catch {
+        // pointer already released
+      }
+    }
+
+    const mode = state.mode;
+    cardScrubRef.current = null;
+
+    if (mode === "scroll") {
+      setScrubArtistId(null);
+      setScrubWorkId(null);
+      return;
+    }
+
+    const cardId = hitTestPickCardId(
+      event.clientX,
+      event.clientY,
+      artist.artistId,
+    );
+
+    setScrubArtistId(null);
+    setScrubWorkId(null);
+
+    if (!cardId) {
+      return;
+    }
+
+    const work = artist.works.find(
+      (item) => item.id === cardId,
+    );
+
+    if (work) {
+      onWorkClick(work);
+    }
+  }
+
+  function onStackPointerCancel() {
+    resetCardScrub();
+  }
+
   const picksPanelContent = (
     <>
       <div className="flex items-center justify-between">
@@ -652,7 +1081,9 @@ function changeFilter(
 
               const expanded =
                 hoveredArtistId ===
-                artist.artistId;
+                  artist.artistId ||
+                scrubArtistId ===
+                  artist.artistId;
 
               return (
                 <div
@@ -691,7 +1122,36 @@ function changeFilter(
                     </span>
                   </div>
 
-                  <div className="relative mt-3 h-[126px]">
+                  <div
+                    className="relative mt-3 h-[126px] touch-pan-y"
+                    onPointerDown={(
+                      event,
+                    ) =>
+                      onStackPointerDown(
+                        event,
+                        artist.artistId,
+                      )
+                    }
+                    onPointerMove={(
+                      event,
+                    ) =>
+                      onStackPointerMove(
+                        event,
+                        artist.artistId,
+                      )
+                    }
+                    onPointerUp={(
+                      event,
+                    ) =>
+                      onStackPointerUp(
+                        event,
+                        artist,
+                      )
+                    }
+                    onPointerCancel={
+                      onStackPointerCancel
+                    }
+                  >
                     {visibleWorks.map(
                       (
                         work,
@@ -718,24 +1178,53 @@ function changeFilter(
                             ? (visibleWorks.length - index) * gap
                             : (visibleWorks.length - 1 - index) * gap;
 
+                        const isScrubActive =
+                          scrubWorkId ===
+                          work.id;
+
                         return (
                           <button
                             key={
                               work.id
                             }
                             type="button"
-                            onClick={() =>
+                            data-pick-card-id={
+                              work.id
+                            }
+                            data-pick-stack={
+                              artist.artistId
+                            }
+                            onClick={(
+                              event,
+                            ) => {
+                              if (
+                                suppressCardClickRef.current
+                              ) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                suppressCardClickRef.current =
+                                  false;
+                                return;
+                              }
+
                               onWorkClick(
                                 work,
-                              )
-                            }
-                            className="absolute top-0 h-[120px] w-[86px] overflow-hidden rounded-xl border-2 border-white bg-gray-100 shadow-md transition-all duration-300 ease-out hover:-translate-y-2"
+                              );
+                            }}
+                            className={`absolute top-0 h-[120px] w-[86px] overflow-hidden rounded-xl border-2 border-white bg-gray-100 shadow-md transition-all duration-300 ease-out hover:-translate-y-2 ${
+                              isScrubActive
+                                ? "-translate-y-2 scale-[1.03] shadow-lg"
+                                : ""
+                            }`}
                             style={{
                               right: `${right}px`,
                               zIndex:
-                                visibleWorks.length -
-                                index +
-                                2,
+                                isScrubActive
+                                  ? visibleWorks.length +
+                                    10
+                                  : visibleWorks.length -
+                                    index +
+                                    2,
                             }}
                             aria-label={`Open ${artist.artistName} work`}
                           >
@@ -879,39 +1368,75 @@ function changeFilter(
 
     {onMobileOpenChange && (
       <>
+        <button
+          type="button"
+          aria-label="Open My Picks"
+          aria-expanded={mobileOpen}
+          onClick={onHandleClick}
+          onPointerDown={onHandlePointerDown}
+          onPointerMove={onHandlePointerMove}
+          onPointerUp={onHandlePointerUp}
+          onPointerCancel={onHandlePointerUp}
+          className={`fixed right-0 top-1/2 z-[52] flex h-[84px] w-12 -translate-y-1/2 translate-x-1 touch-none items-center justify-center rounded-l-2xl border border-r-0 border-gray-200/80 bg-white/75 shadow-[-2px_0_10px_rgba(0,0,0,0.06)] backdrop-blur-[2px] transition-opacity duration-200 xl:hidden ${
+            mobileOpen
+              ? "pointer-events-none opacity-0"
+              : "opacity-100"
+          }`}
+        >
+          <span
+            className="relative block h-[18px] w-[22px]"
+            aria-hidden="true"
+          >
+            <span className="absolute bottom-0 left-0 h-3 w-3.5 rounded-[3px] border border-gray-300 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]" />
+            <span className="absolute bottom-[3px] left-[5px] h-3 w-3.5 rounded-[3px] border border-gray-300 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]" />
+            <span className="absolute bottom-[6px] left-[10px] h-3 w-3.5 rounded-[3px] border border-gray-400 bg-gray-50 shadow-[0_1px_3px_rgba(0,0,0,0.08)]" />
+          </span>
+
+          {plusOneKey > 0 && (
+            <span
+              key={plusOneKey}
+              className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 animate-[pickPulse_0.65s_ease-out_forwards] whitespace-nowrap text-sm font-bold text-fuchsia-500"
+            >
+              +1
+            </span>
+          )}
+        </button>
+
         <div
           className={`fixed inset-0 z-[55] bg-black/25 transition-opacity duration-300 xl:hidden ${
             mobileOpen
               ? "opacity-100"
               : "pointer-events-none opacity-0"
           }`}
-          onClick={() =>
-            onMobileOpenChange(false)
-          }
+          onClick={closeMobileDrawer}
           aria-hidden={!mobileOpen}
         />
 
         <div
-          className={`fixed inset-y-0 right-0 z-[56] w-[88vw] max-w-[380px] border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(0,0,0,0.08)] transition-transform duration-300 xl:hidden ${
+          className={`fixed inset-y-0 right-0 z-[56] w-[88vw] max-w-[380px] touch-pan-y border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(0,0,0,0.08)] transition-transform duration-300 xl:hidden ${
             mobileOpen
               ? "translate-x-0"
               : "pointer-events-none translate-x-full"
           }`}
         >
-          <button
-            type="button"
-            aria-label="Close My Picks panel"
-            onClick={() =>
-              onMobileOpenChange(false)
+          <div
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 z-10 w-8 touch-none"
+            onPointerDown={
+              onCloseZonePointerDown
             }
-            className="absolute left-0 top-1/2 flex h-[46px] w-[30px] -translate-y-1/2 items-center justify-center rounded-l-lg border border-r-0 border-gray-200 bg-white text-gray-500 shadow-[-2px_0_8px_rgba(0,0,0,0.06)] hover:text-fuchsia-600"
-          >
-            <ChevronRight
-              size={16}
-            />
-          </button>
+            onPointerMove={
+              onCloseZonePointerMove
+            }
+            onPointerUp={
+              onCloseZonePointerUp
+            }
+            onPointerCancel={
+              onCloseZonePointerUp
+            }
+          />
 
-          <div className="h-full overflow-x-hidden overflow-y-auto pb-10 pl-5 pr-5 pt-7">
+          <div className="relative h-full touch-pan-y overflow-x-hidden overflow-y-auto pb-10 pl-8 pr-5 pt-7">
             {picksPanelContent}
           </div>
         </div>

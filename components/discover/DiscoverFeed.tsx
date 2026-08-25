@@ -388,19 +388,6 @@ function getResponsiveColumnCount(width: number) {
   return 2;
 }
 
-function StackedCardsIcon() {
-  return (
-    <span
-      className="relative block h-[18px] w-[22px]"
-      aria-hidden="true"
-    >
-      <span className="absolute bottom-0 left-0 h-3 w-3.5 rounded-[3px] border border-gray-300 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]" />
-      <span className="absolute bottom-[3px] left-[5px] h-3 w-3.5 rounded-[3px] border border-gray-300 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]" />
-      <span className="absolute bottom-[6px] left-[10px] h-3 w-3.5 rounded-[3px] border border-gray-400 bg-gray-50 shadow-[0_1px_3px_rgba(0,0,0,0.08)]" />
-    </span>
-  );
-}
-
 function estimateWorkHeight(
   work: FeedItem,
   columnWidth: number,
@@ -2531,46 +2518,6 @@ function openPickedWork(
     >
       {hasPicks ? "Next" : "Pass"}
     </button>
-
-    <button
-      type="button"
-      aria-label={
-        mobilePicksOpen
-          ? "Close My Picks"
-          : "Open My Picks"
-      }
-      aria-expanded={mobilePicksOpen}
-      onClick={() =>
-        setMobilePicksOpen(
-          (current) => !current,
-        )
-      }
-      className="absolute right-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-xl border border-gray-200 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-transform duration-200 xl:hidden"
-    >
-      <span
-        key={
-          mobilePickPlusOneKey > 0
-            ? `pick-btn-${mobilePickPlusOneKey}`
-            : "pick-btn-idle"
-        }
-        className={
-          mobilePickPlusOneKey > 0
-            ? "inline-flex animate-[pickPop_0.25s_ease-out]"
-            : "inline-flex"
-        }
-      >
-        <StackedCardsIcon />
-      </span>
-
-      {mobilePickPlusOneKey > 0 && (
-        <span
-          key={mobilePickPlusOneKey}
-          className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 animate-[pickPulse_0.65s_ease-out_forwards] whitespace-nowrap text-sm font-bold text-fuchsia-500"
-        >
-          +1
-        </span>
-      )}
-    </button>
   </div>
 </div>
 )}
@@ -2582,6 +2529,7 @@ function openPickedWork(
   onWorkClick={openPickedWork}
   mobileOpen={mobilePicksOpen}
   onMobileOpenChange={setMobilePicksOpen}
+  plusOneKey={mobilePickPlusOneKey}
 />
       {selectedWork && (
         <div
