@@ -7,7 +7,7 @@ import type { MutableRefObject } from "react";
 import AuthModal from "@/components/AuthModal";
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
 import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
-import { consumeAllOverlayHistory, useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
+import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 import {
   DISCOVER_TYPE_TO_TAG,
   DISCOVER_TYPES,
@@ -2092,13 +2092,11 @@ function handleViewArtistProfile(
   event.preventDefault();
 
   setSelectedWork(null);
-  setMobilePicksOpen(false);
   setPickPanelRefreshKey(
     (current) => current + 1,
   );
-  consumeAllOverlayHistory();
 
-  router.push(
+  router.replace(
     `/creator/${artistId}`,
   );
 }
@@ -2628,6 +2626,7 @@ function openPickedWork(
 
               <Link
                 href={`/creator/${selectedWork.artistId}`}
+                replace
                 onClick={(event) =>
                   handleViewArtistProfile(
                     event,
