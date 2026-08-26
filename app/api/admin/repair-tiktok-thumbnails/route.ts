@@ -3,7 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
 import {
+  TIKTOK_THUMBNAILS_BUCKET,
   cacheTikTokThumbnail,
+  extractTikTokThumbnailObjectPath,
+  getTikTokThumbnailObjectPath,
   isPermanentTikTokThumbnailUrl,
 } from "@/lib/tiktok/cacheTikTokThumbnail";
 import {
@@ -60,12 +63,13 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function parseLimitOffset(body: unknown) {
+function parseRepairRequest(body: unknown) {
   const payload =
     body && typeof body === "object"
       ? (body as {
           limit?: unknown;
           offset?: unknown;
+          force?: unknown;
         })
       : {};
 
@@ -90,6 +94,7 @@ function parseLimitOffset(body: unknown) {
   return {
     limit: Math.min(rawLimit, MAX_LIMIT),
     offset: rawOffset,
+    force: payload.force === true,
   };
 }
 
@@ -133,9 +138,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const paging = parseLimitOffset(body);
+  const requestOptions = parseRepairRequest(body);
 
-  if (!paging) {
+  if (!requestOptions) {
     return NextResponse.json(
       { error: "limit and offset must be non-negative integers." },
       { status: 400 },
@@ -159,8 +164,8 @@ export async function POST(request: NextRequest) {
     .eq("source", "tiktok")
     .order("id", { ascending: true })
     .range(
-      paging.offset,
-      paging.offset + paging.limit - 1,
+      requestOptions.offset,
+      requestOptions.offset + requestOptions.limit - 1,
     );
 
   if (error) {
@@ -178,7 +183,12 @@ export async function POST(request: NextRequest) {
   let skipped = 0;
 
   await mapWithConcurrency(works, CONCURRENCY, async (work) => {
-    if (isPermanentTikTokThumbnailUrl(work.thumbnail_url)) {
+    const previousThumbnailUrl = work.thumbnail_url;
+
+    if (
+      !requestOptions.force &&
+      isPermanentTikTokThumbnailUrl(previousThumbnailUrl)
+    ) {
       skipped += 1;
       return;
     }
@@ -267,6 +277,35 @@ export async function POST(request: NextRequest) {
       return;
     }
 
+    const newObjectPath =
+      getTikTokThumbnailObjectPath(videoId);
+    const previousObjectPath =
+      extractTikTokThumbnailObjectPath(
+        previousThumbnailUrl,
+      );
+
+    if (
+      previousObjectPath &&
+      previousObjectPath !== newObjectPath
+    ) {
+      const { error: removeError } =
+        await supabaseAdmin.storage
+          .from(TIKTOK_THUMBNAILS_BUCKET)
+          .remove([previousObjectPath]);
+
+      if (removeError) {
+        console.warn(
+          "REPAIR TIKTOK THUMBNAIL CLEANUP FAILED:",
+          {
+            workId: work.id,
+            sourceId: videoId,
+            objectPath: previousObjectPath,
+            reason: removeError.message,
+          },
+        );
+      }
+    }
+
     repaired += 1;
   });
 
@@ -276,7 +315,8 @@ export async function POST(request: NextRequest) {
     skipped,
     failed: failures.length,
     failures,
-    limit: paging.limit,
-    offset: paging.offset,
+    limit: requestOptions.limit,
+    offset: requestOptions.offset,
+    force: requestOptions.force,
   });
 }

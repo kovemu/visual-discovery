@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import sharp from "sharp";
 
 export const TIKTOK_THUMBNAILS_BUCKET =
   "tiktok-thumbnails";
@@ -7,6 +8,7 @@ export const TIKTOK_THUMBNAILS_PUBLIC_MARKER =
   "/storage/v1/object/public/tiktok-thumbnails/";
 
 const TIKTOK_VIDEO_ID_PATTERN = /^\d+$/;
+const WEBP_CONTENT_TYPE = "image/webp";
 
 function getServiceRoleClient() {
   const supabaseUrl =
@@ -26,6 +28,45 @@ function getServiceRoleClient() {
   });
 }
 
+export function getTikTokThumbnailObjectPath(
+  videoId: string,
+) {
+  return `${videoId.trim()}.webp`;
+}
+
+export function extractTikTokThumbnailObjectPath(
+  url: string | null | undefined,
+) {
+  if (
+    typeof url !== "string" ||
+    !url.includes(TIKTOK_THUMBNAILS_PUBLIC_MARKER)
+  ) {
+    return null;
+  }
+
+  const markerIndex = url.indexOf(
+    TIKTOK_THUMBNAILS_PUBLIC_MARKER,
+  );
+  const rawPath = url
+    .slice(
+      markerIndex +
+        TIKTOK_THUMBNAILS_PUBLIC_MARKER.length,
+    )
+    .split("?")[0]
+    .split("#")[0]
+    .trim();
+
+  if (!rawPath) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(rawPath);
+  } catch {
+    return rawPath;
+  }
+}
+
 export function isPermanentTikTokThumbnailUrl(
   url: string | null | undefined,
 ) {
@@ -43,26 +84,18 @@ function normalizeContentType(value: string | null) {
   return value.split(";")[0].trim().toLowerCase();
 }
 
-function extensionFromContentType(contentType: string) {
-  switch (contentType) {
-    case "image/webp":
-      return { extension: "webp", contentType };
-    case "image/jpeg":
-    case "image/jpg":
-      return { extension: "jpg", contentType: "image/jpeg" };
-    case "image/png":
-      return { extension: "png", contentType };
-    case "image/avif":
-      return { extension: "avif", contentType };
-    case "image/gif":
-      return { extension: "gif", contentType };
-    default:
-      if (contentType.startsWith("image/")) {
-        return { extension: "jpg", contentType: "image/jpeg" };
-      }
-
-      return null;
-  }
+async function optimizeTikTokThumbnailBuffer(
+  buffer: Buffer,
+) {
+  return sharp(buffer)
+    .resize({
+      width: 720,
+      height: 1280,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .webp({ quality: 78 })
+    .toBuffer();
 }
 
 export async function cacheTikTokThumbnail({
@@ -121,27 +154,29 @@ export async function cacheTikTokThumbnail({
     const contentType = normalizeContentType(
       response.headers.get("content-type"),
     );
-    const mapped = contentType
-      ? extensionFromContentType(contentType)
-      : null;
 
-    if (!mapped) {
+    if (contentType && !contentType.startsWith("image/")) {
       console.warn("[cacheTikTokThumbnail] invalid content type", {
         videoId: trimmedVideoId,
-        reason: contentType
-          ? `unsupported_content_type:${contentType}`
-          : "missing_content_type",
+        reason: `unsupported_content_type:${contentType}`,
       });
       return null;
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const objectPath = `${trimmedVideoId}.${mapped.extension}`;
+    const sourceBuffer = Buffer.from(
+      await response.arrayBuffer(),
+    );
+    const optimizedBuffer =
+      await optimizeTikTokThumbnailBuffer(
+        sourceBuffer,
+      );
+    const objectPath =
+      getTikTokThumbnailObjectPath(trimmedVideoId);
 
     const { error: uploadError } = await supabase.storage
       .from(TIKTOK_THUMBNAILS_BUCKET)
-      .upload(objectPath, buffer, {
-        contentType: mapped.contentType,
+      .upload(objectPath, optimizedBuffer, {
+        contentType: WEBP_CONTENT_TYPE,
         upsert: true,
         cacheControl: "31536000",
       });
