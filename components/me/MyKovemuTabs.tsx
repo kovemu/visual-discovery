@@ -8,6 +8,13 @@ import MyKovemuVotes from "@/components/me/MyKovemuVotes";
 
 type Tab = "picks" | "votes" | "palette";
 
+const MVP_HIDE_VOTES_TAB = true;
+
+const votesTab = {
+  id: "votes" as const,
+  label: "Votes",
+};
+
 const tabs: {
   id: Tab;
   label: string;
@@ -17,10 +24,7 @@ const tabs: {
     id: "picks",
     label: "Picks",
   },
-  {
-    id: "votes",
-    label: "Votes",
-  },
+  ...(MVP_HIDE_VOTES_TAB ? [] : [votesTab]),
   {
     id: "palette",
     label: "My Palette",

@@ -7,7 +7,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 
@@ -68,20 +67,6 @@ type ArtistPickGroup = {
   works: PickWork[];
 };
 
-type CategoryFilter =
-  | "Music"
-  | "Dance"
-  | "Art"
-  | "Cosplay";
-
-const CATEGORY_FILTERS: CategoryFilter[] =
-  [
-    "Music",
-    "Dance",
-    "Art",
-    "Cosplay",
-  ];
-
 function sortArtistGroups(
   groups: ArtistPickGroup[],
 ) {
@@ -97,67 +82,6 @@ function sortArtistGroups(
       a.latestPickAt,
     );
   });
-}
-
-function getDefaultCategoryFilter(
-  groups: ArtistPickGroup[],
-): CategoryFilter {
-  const counts = new Map<
-    CategoryFilter,
-    number
-  >(
-    CATEGORY_FILTERS.map(
-      (category) => [
-        category,
-        0,
-      ],
-    ),
-  );
-
-  for (const group of groups) {
-    const matchedCategory =
-      CATEGORY_FILTERS.find(
-        (category) =>
-          normalizeCategory(
-            group.category,
-          ) ===
-          normalizeCategory(
-            category,
-          ),
-      );
-
-    if (!matchedCategory) {
-      continue;
-    }
-
-    counts.set(
-      matchedCategory,
-      (counts.get(
-        matchedCategory,
-      ) ?? 0) +
-        group.works.length,
-    );
-  }
-
-  return CATEGORY_FILTERS.reduce(
-    (best, category) => {
-      const count =
-        counts.get(category) ?? 0;
-      const bestCount =
-        counts.get(best) ?? 0;
-
-      return count > bestCount
-        ? category
-        : best;
-    },
-    "Music",
-  );
-}
-
-function normalizeCategory(
-  category: string,
-) {
-  return category.trim().toLowerCase();
 }
 
 function formatCategory(
@@ -375,14 +299,6 @@ export default function MyKovemuPicks() {
   ] = useState(true);
 
   const [
-    categoryFilter,
-    setCategoryFilter,
-  ] = useState<CategoryFilter>("Music");
-
-  const initialCategorySetRef =
-    useRef(false);
-
-  const [
     selectedWork,
     setSelectedWork,
   ] = useState<PickWork | null>(null);
@@ -463,41 +379,12 @@ export default function MyKovemuPicks() {
       ),
     );
 
-    if (
-      !initialCategorySetRef.current
-    ) {
-      setCategoryFilter(
-        getDefaultCategoryFilter(
-          groups,
-        ),
-      );
-      initialCategorySetRef.current =
-        true;
-    }
-
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => {
     void loadPicks();
   }, [loadPicks]);
-
-  const filteredGroups = useMemo(() => {
-    return sortArtistGroups(
-      artistGroups.filter(
-        (group) =>
-          normalizeCategory(
-            group.category,
-          ) ===
-          normalizeCategory(
-            categoryFilter,
-          ),
-      ),
-    );
-  }, [
-    artistGroups,
-    categoryFilter,
-  ]);
 
   async function togglePick(
     work: PickWork,
@@ -687,32 +574,8 @@ export default function MyKovemuPicks() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-4 text-sm font-semibold">
-        {CATEGORY_FILTERS.map(
-          (filter) => (
-            <button
-              key={filter}
-              type="button"
-              onClick={() =>
-                setCategoryFilter(
-                  filter,
-                )
-              }
-              className={
-                categoryFilter ===
-                filter
-                  ? "text-fuchsia-600"
-                  : "text-gray-500 transition hover:text-gray-900"
-              }
-            >
-              {filter}
-            </button>
-          ),
-        )}
-      </div>
-
       {artistGroups.length === 0 ? (
-        <div className="mt-16 rounded-2xl border border-gray-100 px-6 py-16 text-center">
+        <div className="rounded-2xl border border-gray-100 px-6 py-16 text-center">
           <p className="font-bold text-gray-900">
             No Picks yet.
           </p>
@@ -728,17 +591,9 @@ export default function MyKovemuPicks() {
             Discover
           </Link>
         </div>
-      ) : filteredGroups.length ===
-        0 ? (
-        <div className="mt-16 rounded-2xl border border-gray-100 px-6 py-16 text-center">
-          <p className="font-bold text-gray-900">
-            No {categoryFilter} Picks
-            yet.
-          </p>
-        </div>
       ) : (
-        <div className="mt-10 space-y-10">
-          {filteredGroups.map(
+        <div className="space-y-10">
+          {artistGroups.map(
             (group) => (
               <section
                 key={group.artistId}
