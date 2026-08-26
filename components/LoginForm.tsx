@@ -7,6 +7,10 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import LegalModal, {
+  type LegalModalType,
+} from "@/components/legal/LegalModal";
+import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
 import { createClient } from "@/lib/supabase/client";
 
 type LoginFormProps = {
@@ -132,6 +136,8 @@ export default function LoginForm({
     setAlreadyRegistered,
   ] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [legalModal, setLegalModal] =
+    useState<LegalModalType | null>(null);
 
   const resolvedPresentation =
     presentation ?? "page";
@@ -212,6 +218,10 @@ export default function LoginForm({
     }
 
     setLoading(false);
+
+    trackProductEvent({
+      event_name: "signup",
+    });
 
     if (data.session) {
       if (onSuccess) {
@@ -450,9 +460,40 @@ export default function LoginForm({
               ? "Create account"
               : "Log in"}
         </button>
+
+        {isSignup && (
+          <p className="text-center text-xs leading-5 text-gray-500">
+            By creating an account, you agree to our{" "}
+            <button
+              type="button"
+              onClick={() => setLegalModal("terms")}
+              className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+            >
+              Terms
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              onClick={() => setLegalModal("privacy")}
+              className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+            >
+              Privacy Policy
+            </button>
+            .
+          </p>
+        )}
       </form>
 
+      {isSignup && legalModal && (
+        <LegalModal
+          type={legalModal}
+          open
+          onClose={() => setLegalModal(null)}
+        />
+      )}
+
       {showFooter && (
+        <>
         <div className="mt-6 text-center text-sm text-gray-500">
           {resolvedPresentation ===
           "modal" ? (
@@ -520,6 +561,17 @@ export default function LoginForm({
             </>
           )}
         </div>
+
+        <div className="mt-5 text-center text-xs text-gray-400">
+          Contact:{" "}
+          <a
+            href="mailto:kovemusin@gmail.com"
+            className="font-medium transition hover:text-fuchsia-600"
+          >
+            kovemusin@gmail.com
+          </a>
+        </div>
+      </>
       )}
     </div>
   );

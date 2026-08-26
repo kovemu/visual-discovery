@@ -6,7 +6,8 @@ export type OverlayId =
   | "work"
   | "picks"
   | "auth"
-  | "search";
+  | "search"
+  | "legal";
 
 const STACK_KEY = "kovemuOverlayStack";
 
@@ -25,7 +26,8 @@ function isOverlayId(value: unknown): value is OverlayId {
     value === "work" ||
     value === "picks" ||
     value === "auth" ||
-    value === "search"
+    value === "search" ||
+    value === "legal"
   );
 }
 

@@ -1,8 +1,8 @@
 import Header from "@/components/Header";
 import FeaturedWorksCarousel from "@/components/artist/FeaturedWorksCarousel";
 import LatestWorksCarousel from "@/components/artist/LatestWorksCarousel";
-import ArtistVote from "@/components/artist/ArtistVote";
 import ProfileMyPicks from "@/components/artist/ProfileMyPicks";
+import ProfileOpenTracker from "@/components/analytics/ProfileOpenTracker";
 
 import {
   createLucideIcon,
@@ -479,6 +479,7 @@ export default async function CreatorPage({
 
   return (
     <>
+    <ProfileOpenTracker artistId={artistId} />
     <main className="min-h-screen bg-white">
       <Header />
 
@@ -599,8 +600,7 @@ export default async function CreatorPage({
       </section>
 
       <div className="mx-auto max-w-7xl px-6 py-12 lg:px-10">
-        <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_300px]">
-           <div className="min-w-0">
+        <div className="min-w-0">
             {/* About */}
             <section>
               <h2 className="text-3xl font-black tracking-tight text-gray-950">
@@ -655,29 +655,14 @@ export default async function CreatorPage({
                 </div>
               )}
             </section>
-          </div>
 
-          {/* Artist Sidebar */}
-          <aside className="space-y-5">
-  {dbCreator && (
-    <ArtistVote
-      artistId={artistId}
-      artistName={artistName}
-      category={artistCategory}
-    />
-  )}
-
-  {isCurated && (
-    <p className="text-xs leading-5 text-gray-400">
-      This profile is curated by Kovemu
-      using publicly available
-      information.
-    </p>
-  )}
-          </aside>
+            {isCurated && (
+              <p className="mt-14 text-xs leading-5 text-gray-400">
+                This profile is curated by Kovemu using publicly available
+                information.
+              </p>
+            )}
         </div>
-
-       
       </div>
     </main>
     <ProfileMyPicks />

@@ -8,6 +8,7 @@ import AuthModal from "@/components/AuthModal";
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
 import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
 import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
+import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
 import {
   DISCOVER_TYPE_TO_TAG,
   DISCOVER_TYPES,
@@ -1151,6 +1152,42 @@ const [
     }
   }
 
+  const lastTrackedSetSignatureRef =
+    useRef("");
+
+  function trackDiscoverSetViewIfNew(
+    nextSet: FeedItem[],
+    types: DiscoverType[],
+  ) {
+    if (nextSet.length === 0) {
+      return;
+    }
+
+    const signature = nextSet
+      .map((work) => work.id)
+      .sort()
+      .join(",");
+
+    if (
+      !signature ||
+      signature ===
+        lastTrackedSetSignatureRef.current
+    ) {
+      return;
+    }
+
+    lastTrackedSetSignatureRef.current =
+      signature;
+
+    trackProductEvent({
+      event_name: "discover_set_view",
+      metadata: {
+        types: types.join(","),
+        count: nextSet.length,
+      },
+    });
+  }
+
   function applyCandidateBatch(
     signature: TypesSignature,
     data: CandidateBatchResponse,
@@ -1520,6 +1557,10 @@ const [
 
     setDisplayWorks(nextSet);
     markWorksShown(nextSet);
+    trackDiscoverSetViewIfNew(
+      nextSet,
+      types,
+    );
    
 
     const nextArtistIds = Array.from(
@@ -1647,6 +1688,10 @@ const [
     );
     markWorksShown(
       initialSet,
+    );
+    trackDiscoverSetViewIfNew(
+      initialSet,
+      initialTypes,
     );
 
     recentArtistsRef.current =
@@ -1853,6 +1898,13 @@ const [
     return;
   }
 
+  trackProductEvent({
+    event_name: "pass_next",
+    metadata: {
+      action: hasPicks ? "next" : "pass",
+    },
+  });
+
   if (currentSetPickedCount > 0) {
   setPickPanelAddedCount(
     currentSetPickedCount,
@@ -1907,6 +1959,10 @@ const [
 
         setDisplayWorks(nextSet);
         markWorksShown(nextSet);
+        trackDiscoverSetViewIfNew(
+          nextSet,
+          activeTypes,
+        );
         setTransitionStage(
           "entering",
         );
@@ -2072,6 +2128,12 @@ const [
 
     return;
   }
+
+  trackProductEvent({
+    event_name: "pick",
+    artist_id: work.artistId,
+    work_id: work.id,
+  });
 
   setPickPanelRefreshKey(
     (current) => current + 1,
