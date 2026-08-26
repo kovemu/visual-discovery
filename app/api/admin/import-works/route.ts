@@ -3,6 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
 import { buildCanonicalTikTokUrl } from "@/lib/tiktok/extractTikTokVideoId";
+import {
+  cacheTikTokThumbnail,
+  isPermanentTikTokThumbnailUrl,
+} from "@/lib/tiktok/cacheTikTokThumbnail";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -19,8 +23,82 @@ type ImportWork = {
   source?: string;
 };
 
+type ImportWorkRow = {
+  artist_id: string;
+  type: string;
+  source: string;
+  source_id: string;
+  source_url: string;
+  title: string;
+  description: string | null;
+  thumbnail_url: string | null;
+  published_at: string | null;
+  duration_seconds: number | null;
+  featured: boolean;
+};
+
 function resolveWorkSource(source: unknown) {
   return source === "tiktok" ? "tiktok" : "youtube";
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index]);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker()),
+  );
+
+  return results;
+}
+
+async function resolveTikTokThumbnailUrl({
+  videoId,
+  incomingThumbnail,
+  existingThumbnail,
+}: {
+  videoId: string;
+  incomingThumbnail: string | null;
+  existingThumbnail: string | null;
+}) {
+  if (isPermanentTikTokThumbnailUrl(incomingThumbnail)) {
+    return incomingThumbnail;
+  }
+
+  if (!incomingThumbnail) {
+    return isPermanentTikTokThumbnailUrl(existingThumbnail)
+      ? existingThumbnail
+      : null;
+  }
+
+  const cached = await cacheTikTokThumbnail({
+    videoId,
+    temporaryThumbnailUrl: incomingThumbnail,
+  });
+
+  if (cached) {
+    return cached;
+  }
+
+  if (isPermanentTikTokThumbnailUrl(existingThumbnail)) {
+    return existingThumbnail;
+  }
+
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -68,36 +146,95 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    const rows = works.map((work) => {
-      const source = resolveWorkSource(work.source);
-      const sourceUrl =
-        source === "tiktok"
-          ? buildCanonicalTikTokUrl(work.url) ??
-            work.url
-          : work.url;
+    const tiktokSourceIds = works
+      .filter((work) => resolveWorkSource(work.source) === "tiktok")
+      .map((work) => work.id)
+      .filter(Boolean);
 
-      return {
-        artist_id: artistId,
+    const existingThumbnailBySourceId = new Map<
+      string,
+      string | null
+    >();
 
-        type: "video",
-        source,
+    if (tiktokSourceIds.length > 0) {
+      const { data: existingTikTokWorks, error: existingError } =
+        await supabaseAdmin
+          .from("works")
+          .select("source_id, thumbnail_url")
+          .eq("source", "tiktok")
+          .in("source_id", tiktokSourceIds);
 
-        source_id: work.id,
-        source_url: sourceUrl,
+      if (existingError) {
+        console.error(
+          "IMPORT WORKS EXISTING TIKTOK LOOKUP ERROR:",
+          existingError,
+        );
+      } else {
+        for (const row of existingTikTokWorks ?? []) {
+          if (typeof row.source_id === "string") {
+            existingThumbnailBySourceId.set(
+              row.source_id,
+              typeof row.thumbnail_url === "string"
+                ? row.thumbnail_url
+                : null,
+            );
+          }
+        }
+      }
+    }
 
-        title: work.title,
-        description: work.description || null,
-        thumbnail_url: work.thumbnail || null,
+    const rows = await mapWithConcurrency(
+      works,
+      3,
+      async (work): Promise<ImportWorkRow> => {
+        const source = resolveWorkSource(work.source);
+        const sourceUrl =
+          source === "tiktok"
+            ? buildCanonicalTikTokUrl(work.url) ??
+              work.url
+            : work.url;
 
-        published_at:
-          work.publishedAt ||
-          (source === "tiktok"
-            ? new Date().toISOString()
-            : null),
-        duration_seconds: work.durationSeconds ?? null,
-        featured: work.featured === true,
-      };
-    });
+        const incomingThumbnail =
+          typeof work.thumbnail === "string" &&
+          work.thumbnail.trim()
+            ? work.thumbnail.trim()
+            : null;
+
+        let thumbnailUrl = incomingThumbnail;
+
+        if (source === "tiktok") {
+          thumbnailUrl = await resolveTikTokThumbnailUrl({
+            videoId: work.id,
+            incomingThumbnail,
+            existingThumbnail:
+              existingThumbnailBySourceId.get(work.id) ??
+              null,
+          });
+        }
+
+        return {
+          artist_id: artistId,
+
+          type: "video",
+          source,
+
+          source_id: work.id,
+          source_url: sourceUrl,
+
+          title: work.title,
+          description: work.description || null,
+          thumbnail_url: thumbnailUrl,
+
+          published_at:
+            work.publishedAt ||
+            (source === "tiktok"
+              ? new Date().toISOString()
+              : null),
+          duration_seconds: work.durationSeconds ?? null,
+          featured: work.featured === true,
+        };
+      },
+    );
 
     const { data, error } = await supabaseAdmin
       .from("works")

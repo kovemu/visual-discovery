@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  asOptionalOEmbedString,
+  fetchTikTokOEmbed,
+} from "@/lib/tiktok/fetchTikTokOEmbed";
+import {
   buildCanonicalTikTokUrl,
   extractTikTokVideoId,
 } from "@/lib/tiktok/extractTikTokVideoId";
-
-const TIKTOK_OEMBED_ENDPOINT =
-  "https://www.tiktok.com/oembed";
 
 const CACHE_TTL_MS =
   24 * 60 * 60 * 1000;
@@ -29,42 +30,6 @@ type CacheEntry = {
 
 const oembedCache =
   new Map<string, CacheEntry>();
-
-function asOptionalString(value: unknown) {
-  return typeof value === "string" && value.trim()
-    ? value.trim()
-    : null;
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-function parseRetryAfterMs(
-  value: string | null,
-) {
-  if (!value?.trim()) {
-    return null;
-  }
-
-  const seconds = Number(value);
-
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.ceil(seconds * 1000);
-  }
-
-  const dateMs = Date.parse(value);
-
-  if (Number.isFinite(dateMs)) {
-    const delayMs = dateMs - Date.now();
-
-    return delayMs > 0 ? delayMs : 0;
-  }
-
-  return null;
-}
 
 function getCachedPayload(
   videoId: string,
@@ -101,60 +66,18 @@ function buildSuccessPayload(
   return {
     videoId,
     url: canonicalUrl,
-    title: asOptionalString(data.title),
-    author_name: asOptionalString(data.author_name),
-    author_url: asOptionalString(data.author_url),
-    thumbnail_url: asOptionalString(
+    title: asOptionalOEmbedString(data.title),
+    author_name: asOptionalOEmbedString(
+      data.author_name,
+    ),
+    author_url: asOptionalOEmbedString(
+      data.author_url,
+    ),
+    thumbnail_url: asOptionalOEmbedString(
       data.thumbnail_url,
     ),
-    html: asOptionalString(data.html),
+    html: asOptionalOEmbedString(data.html),
     oembedFailed: false,
-  };
-}
-
-async function fetchTikTokOEmbed(
-  canonicalUrl: string,
-) {
-  const oembedUrl = new URL(TIKTOK_OEMBED_ENDPOINT);
-  oembedUrl.searchParams.set("url", canonicalUrl);
-
-  let response = await fetch(oembedUrl, {
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-
-  if (response.status === 429) {
-    const retryAfterMs = parseRetryAfterMs(
-      response.headers.get("retry-after"),
-    );
-
-    if (retryAfterMs != null) {
-      await sleep(retryAfterMs);
-
-      response = await fetch(oembedUrl, {
-        headers: {
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      });
-    }
-  }
-
-  if (response.ok) {
-    return {
-      ok: true as const,
-      data: (await response.json()) as Record<
-        string,
-        unknown
-      >,
-    };
-  }
-
-  return {
-    ok: false as const,
-    status: response.status,
   };
 }
 
