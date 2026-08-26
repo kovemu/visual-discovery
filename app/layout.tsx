@@ -12,10 +12,30 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const SITE_TITLE =
+  "Kovemu | Discover Your Next K-pop Artist";
+
+const SITE_DESCRIPTION =
+  "Discover rising and under-the-radar K-pop artists through performances, fancams, and visual highlights.";
+
 export const metadata: Metadata = {
-  title: "Kovemu | Discover Your Next K-pop Artist",
-  description:
-    "Discover rising K-pop artists through performances, fancams, and visual highlights.",
+  metadataBase: new URL("https://kovemu.com"),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    url: "https://kovemu.com",
+    siteName: "Kovemu",
+    type: "website",
+    images: ["/og/kovemu-og.png"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: ["/og/kovemu-og.png"],
+  },
 };
 
 export default function RootLayout({
