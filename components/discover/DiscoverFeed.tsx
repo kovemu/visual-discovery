@@ -1,20 +1,30 @@
 "use client";
-import { createClient } from "@/lib/supabase/client";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { MutableRefObject } from "react";
+
+import { useEffect, useMemo, useState } from "react";
+
 import AuthModal from "@/components/AuthModal";
-import MyPicksPanel from "@/components/discover/MyPicksPanel";
-import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
+import SavedPanel, {
+  type SavedPanelWork,
+} from "@/components/discover/SavedPanel";
+import DiscoverCarousel from "@/components/discover/DiscoverCarousel";
+import { useDiscoverFeed } from "@/components/discover/useDiscoverFeed";
+import WorkMediaModal from "@/components/works/WorkMediaModal";
 import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
+import { useTranslation } from "@/lib/i18n/LanguageProvider";
+import { getAnalyticsSource } from "@/lib/works/workDisplay";
+import { createClient } from "@/lib/supabase/client";
 import {
-  DISCOVER_TYPE_TO_TAG,
-  DISCOVER_TYPES,
-  getTypesSignature,
-  type DiscoverType,
-} from "@/lib/discover/discoverTypes";
+  CREATOR_CATEGORY_OPTIONS,
+  type CreatorCategory,
+} from "@/lib/creator/creatorCategories";
+import {
+  buildDiscoverCategorySignature,
+  createAllSelectedCategories,
+  handleAllCategoryClick,
+  handleCreatorCategoryClick,
+  isAllDiscoverCategoriesSelected,
+} from "@/lib/discover/discoverCategorySelection";
 
 export type FeedItem = {
   id: string;
@@ -23,1742 +33,109 @@ export type FeedItem = {
   category: string;
   artistTags?: string[];
   type?: "image" | "youtube" | "tiktok";
+  source?: string;
   image?: string;
   videoId?: string;
   caption?: string | null;
   sourceUrl?: string;
   artistUrl?: string;
+  durationSeconds?: number;
 };
-
-const DISCOVER_TYPE_LABELS: Record<
-  DiscoverType,
-  string
-> = {
-  girl: "GIRL GROUPS",
-  boy: "BOY GROUPS",
-  solo: "SOLO",
-};
-
-const DEFAULT_ACTIVE_TYPES: DiscoverType[] =
-  [...DISCOVER_TYPES];
-
-const DISCOVER_TYPES_STORAGE_KEY =
-  "kovemu-discover-types";
-
-const DISCOVER_SEED_STORAGE_PREFIX =
-  "kovemu-discover-seed-";
-
-type TypesSignature = string;
-
-const CANDIDATE_REFILL_THRESHOLD = 24;
-
-type CandidateBatchResponse = {
-  works?: FeedItem[];
-  nextRound?: number;
-  artistPageCount?: number;
-  artistPage?: number;
-  workPage?: number;
-  reusedInitialBatch?: boolean;
-};
-
-type WorkPageCycleState = {
-  workPage: number;
-  artistPageCount: number;
-  hasWorks: boolean;
-  seenArtistPages: Set<number>;
-};
-
-function updateWorkPageCycleExhaustion(
-  signature: TypesSignature,
-  artistPage: number,
-  artistPageCount: number,
-  workPage: number,
-  incomingCount: number,
-  workPageCycleRef: MutableRefObject<
-    Partial<
-      Record<
-        TypesSignature,
-        WorkPageCycleState
-      >
-    >
-  >,
-  exhaustedSignaturesRef: MutableRefObject<
-    Set<TypesSignature>
-  >,
-) {
-  let state =
-    workPageCycleRef.current[
-      signature
-    ];
-
-  if (
-    state &&
-    state.workPage !== workPage
-  ) {
-    if (
-      state.seenArtistPages.size >=
-        state.artistPageCount &&
-      !state.hasWorks
-    ) {
-      exhaustedSignaturesRef.current.add(
-        signature,
-      );
-    }
-
-    state = undefined;
-  }
-
-  if (!state) {
-    state = {
-      workPage,
-      artistPageCount,
-      hasWorks: incomingCount > 0,
-      seenArtistPages: new Set([
-        artistPage,
-      ]),
-    };
-  } else {
-    state.artistPageCount =
-      artistPageCount;
-    state.seenArtistPages.add(
-      artistPage,
-    );
-
-    if (incomingCount > 0) {
-      state.hasWorks = true;
-    }
-  }
-
-  workPageCycleRef.current[signature] =
-    state;
-
-  if (
-    state.seenArtistPages.size >=
-    state.artistPageCount
-  ) {
-    if (!state.hasWorks) {
-      exhaustedSignaturesRef.current.add(
-        signature,
-      );
-    }
-
-    delete workPageCycleRef.current[
-      signature
-    ];
-  }
-}
-
-function isDiscoverTypeValue(
-  value: string,
-): value is DiscoverType {
-  return DISCOVER_TYPES.includes(
-    value as DiscoverType,
-  );
-}
-
-function normalizeActiveTypes(
-  types: DiscoverType[],
-): DiscoverType[] {
-  const unique = [
-    ...new Set(types),
-  ].filter(isDiscoverTypeValue);
-
-  if (unique.length === 0) {
-    return DEFAULT_ACTIVE_TYPES;
-  }
-
-  return unique;
-}
-
-function readStoredDiscoverTypes(): DiscoverType[] {
-  try {
-    const stored =
-      sessionStorage.getItem(
-        DISCOVER_TYPES_STORAGE_KEY,
-      );
-
-    if (!stored) {
-      return DEFAULT_ACTIVE_TYPES;
-    }
-
-    const parsed = JSON.parse(
-      stored,
-    );
-
-    if (!Array.isArray(parsed)) {
-      return DEFAULT_ACTIVE_TYPES;
-    }
-
-    return normalizeActiveTypes(
-      parsed.filter(
-        (item): item is DiscoverType =>
-          typeof item === "string" &&
-          isDiscoverTypeValue(item),
-      ),
-    );
-  } catch {
-    return DEFAULT_ACTIVE_TYPES;
-  }
-}
-
-function saveDiscoverTypes(
-  types: DiscoverType[],
-) {
-  try {
-    sessionStorage.setItem(
-      DISCOVER_TYPES_STORAGE_KEY,
-      JSON.stringify(
-        normalizeActiveTypes(types),
-      ),
-    );
-  } catch {
-    // ignore
-  }
-}
-
-function readStoredTypesSeed(
-  signature: TypesSignature,
-) {
-  try {
-    return sessionStorage.getItem(
-      `${DISCOVER_SEED_STORAGE_PREFIX}${signature}`,
-    );
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredTypesSeed(
-  signature: TypesSignature,
-  seed: string,
-) {
-  try {
-    sessionStorage.setItem(
-      `${DISCOVER_SEED_STORAGE_PREFIX}${signature}`,
-      seed,
-    );
-  } catch {
-    // ignore
-  }
-}
-
-function createTypesSeed() {
-  return `${Date.now().toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2, 12)}`;
-}
-
-function getOrCreateTypesSeed(
-  signature: TypesSignature,
-  cache: Partial<
-    Record<TypesSignature, string>
-  >,
-) {
-  if (cache[signature]) {
-    return cache[signature]!;
-  }
-
-  const stored =
-    readStoredTypesSeed(signature);
-
-  if (stored) {
-    cache[signature] = stored;
-    return stored;
-  }
-
-  const seed = createTypesSeed();
-
-  writeStoredTypesSeed(
-    signature,
-    seed,
-  );
-  cache[signature] = seed;
-
-  return seed;
-}
-
-function isAllTypesActive(
-  activeTypes: DiscoverType[],
-) {
-  return DISCOVER_TYPES.every((type) =>
-    activeTypes.includes(type),
-  );
-}
-
-function workMatchesActiveTypes(
-  work: FeedItem,
-  activeTypes: DiscoverType[],
-) {
-  const tags = work.artistTags ?? [];
-
-  if (tags.length === 0) {
-    return false;
-  }
-
-  const activeTags = activeTypes.map(
-    (type) =>
-      DISCOVER_TYPE_TO_TAG[type],
-  );
-
-  return tags.some((tag) =>
-    activeTags.includes(tag),
-  );
-}
-
-function filterWorksByActiveTypes(
-  works: FeedItem[],
-  activeTypes: DiscoverType[],
-) {
-  return works.filter((work) =>
-    workMatchesActiveTypes(
-      work,
-      activeTypes,
-    ),
-  );
-}
-
-const DISCOVER_SET_SIZE = 12;
-
-const CANDIDATE_PREFETCH_THRESHOLD =
-  DISCOVER_SET_SIZE * 3;
-
-const RECENT_ARTIST_HISTORY_LIMIT = 32;
-
-const VIDEO_HEIGHTS = [230, 280, 330];
-const MASONRY_GAP = 16;
 
 type DiscoverFeedProps = {
   works: FeedItem[];
 };
 
-type TransitionStage =
-  | "idle"
-  | "unpicked-out"
-  | "picked-out"
-  | "entering";
-
-function shuffleWorks(works: FeedItem[]): FeedItem[] {
-  const shuffled = [...works];
-
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const randomIndex = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[i]];
-  }
-
-  return shuffled;
-}
-
-function getWorkThumbnail(work: FeedItem) {
-  if (work.image) return work.image;
-
-  if (work.type === "youtube" && work.videoId) {
-    return `https://i.ytimg.com/vi/${work.videoId}/maxresdefault.jpg`;
-  }
-
-  return "";
-}
-
-function isPlayableVideo(work: FeedItem) {
-  return (
-    (work.type === "youtube" ||
-      work.type === "tiktok") &&
-    Boolean(work.videoId)
-  );
-}
-
-function getVideoHeightPx(work: FeedItem) {
-  const key = work.videoId ?? work.id;
-  let hash = 0;
-
-  for (let i = 0; i < key.length; i += 1) {
-    hash = (hash * 31 + key.charCodeAt(i)) % 10000;
-  }
-
-  return VIDEO_HEIGHTS[hash % VIDEO_HEIGHTS.length];
-}
-
-function getResponsiveMasonryGap(width: number) {
-  if (width >= 640) {
-    return MASONRY_GAP;
-  }
-
-  return 10;
-}
-
-function getResponsiveColumnCount(width: number) {
-  if (width >= 1024) return 4;
-  if (width >= 768) return 3;
-  return 2;
-}
-
-function estimateWorkHeight(
-  work: FeedItem,
-  columnWidth: number,
-  imageRatios: Record<string, number>,
-) {
-  const isYoutube =
-    work.type === "youtube" &&
-    Boolean(work.videoId);
-
-  if (isYoutube) {
-    return getVideoHeightPx(work);
-  }
-
-  const ratio =
-    imageRatios[work.id];
-
-  if (
-    ratio &&
-    ratio > 0
-  ) {
-    return columnWidth / ratio;
-  }
-
-  /*
-    이미지 로딩 전 임시 추정치.
-    세로형 이미지가 많은 Kovemu feed에 맞춰
-    약간 세로로 긴 값을 사용.
-  */
-  return columnWidth * 1.18;
-}
-
-type BalancedLayout = {
-  columns: FeedItem[][];
-};
-
-type LayoutCandidate = {
-  columns: FeedItem[][];
-  heights: number[];
-};
-
-function getLayoutScore(
-  heights: number[],
-) {
-  if (heights.length <= 1) {
-    return 0;
-  }
-
-  const tallest =
-    Math.max(...heights);
-
-  const shortest =
-    Math.min(...heights);
-
-  const average =
-    heights.reduce(
-      (sum, height) =>
-        sum + height,
-      0,
-    ) / heights.length;
-
-  /*
-    가장 긴/짧은 컬럼 차이를 가장 중요하게 보고,
-    평균에서 얼마나 벗어나는지도 함께 평가.
-  */
-  const spread =
-    tallest - shortest;
-
-  const variance =
-    heights.reduce(
-      (sum, height) =>
-        sum +
-        Math.pow(
-          height - average,
-          2,
-        ),
-      0,
-    ) / heights.length;
-
-  return (
-    spread * 1000 +
-    variance
-  );
-}
-
-function buildBalancedLayout(
-  works: FeedItem[],
-  columnCount: number,
-  columnWidth: number,
-  imageRatios: Record<string, number>,
-  masonryGap: number = MASONRY_GAP,
-): BalancedLayout {
-  const safeColumnCount =
-    Math.max(
-      1,
-      columnCount,
-    );
-
-  if (
-    works.length === 0
-  ) {
-    return {
-      columns:
-        Array.from(
-          {
-            length:
-              safeColumnCount,
-          },
-          () => [],
-        ),
-    };
-  }
-
-  if (
-    safeColumnCount === 1
-  ) {
-    return {
-      columns: [
-        [...works],
-      ],
-    };
-  }
-
-  /*
-    각 카드의 예상 높이를 먼저 계산한다.
-
-    이미지 비율은 그대로 유지하고,
-    카드 자체를 늘이거나 줄이지 않는다.
-  */
-  const measuredWorks =
-    works.map(
-      (work, originalIndex) => ({
-        work,
-        originalIndex,
-        height:
-          estimateWorkHeight(
-            work,
-            columnWidth,
-            imageRatios,
-          ),
-      }),
-    );
-
-  /*
-    큰 카드부터 먼저 배치하면
-    뒤에서 매우 긴 카드 하나 때문에
-    특정 컬럼만 길어지는 현상을 줄일 수 있다.
-  */
-  const placementOrder =
-    [...measuredWorks].sort(
-      (a, b) =>
-        b.height -
-        a.height,
-    );
-
-  /*
-    12개 / 4열이면 각 열이 보통 3개가 되도록 한다.
-    반응형 3열/2열에서도 카드 수 차이가 1개를 넘지 않게 한다.
-  */
-  const minItemsPerColumn =
-    Math.floor(
-      works.length /
-        safeColumnCount,
-    );
-
-  const maxItemsPerColumn =
-    Math.ceil(
-      works.length /
-        safeColumnCount,
-    );
-
-  /*
-    Greedy 한 번으로 끝내지 않고
-    여러 배치 후보를 유지하는 Beam Search.
-
-    12개 정도에서는 매우 가볍고,
-    마지막 컬럼만 크게 튀는 경우를
-    Greedy보다 훨씬 잘 줄인다.
-  */
-  const BEAM_WIDTH = 1200;
-
-  let candidates: LayoutCandidate[] =
-    [
-      {
-        columns:
-          Array.from(
-            {
-              length:
-                safeColumnCount,
-            },
-            () => [],
-          ),
-        heights:
-          Array.from(
-            {
-              length:
-                safeColumnCount,
-            },
-            () => 0,
-          ),
-      },
-    ];
-
-  for (
-    let workIndex = 0;
-    workIndex <
-    placementOrder.length;
-    workIndex += 1
-  ) {
-    const item =
-      placementOrder[
-        workIndex
-      ];
-
-    const remainingAfter =
-      placementOrder.length -
-      workIndex -
-      1;
-
-    const nextCandidates:
-      LayoutCandidate[] =
-      [];
-
-    for (
-      const candidate of
-        candidates
-    ) {
-      for (
-        let columnIndex = 0;
-        columnIndex <
-        safeColumnCount;
-        columnIndex += 1
-      ) {
-        const currentCount =
-          candidate.columns[
-            columnIndex
-          ].length;
-
-        if (
-          currentCount >=
-          maxItemsPerColumn
-        ) {
-          continue;
-        }
-
-        /*
-          남은 카드를 모두 사용해도
-          어떤 컬럼이 최소 개수를 채울 수 없는
-          후보는 일찍 제거한다.
-        */
-        const nextCounts =
-          candidate.columns.map(
-            (column, index) =>
-              column.length +
-              (index ===
-              columnIndex
-                ? 1
-                : 0),
-          );
-
-        const totalMinimumNeeded =
-          nextCounts.reduce(
-            (sum, count) =>
-              sum +
-              Math.max(
-                0,
-                minItemsPerColumn -
-                  count,
-              ),
-            0,
-          );
-
-        if (
-          totalMinimumNeeded >
-          remainingAfter
-        ) {
-          continue;
-        }
-
-        const nextColumns =
-          candidate.columns.map(
-            (column, index) =>
-              index ===
-              columnIndex
-                ? [
-                    ...column,
-                    item.work,
-                  ]
-                : [...column],
-          );
-
-        const nextHeights =
-          [
-            ...candidate.heights,
-          ];
-
-        nextHeights[
-          columnIndex
-        ] +=
-          item.height +
-          (currentCount > 0
-            ? masonryGap
-            : 0);
-
-        nextCandidates.push(
-          {
-            columns:
-              nextColumns,
-            heights:
-              nextHeights,
-          },
-        );
-      }
-    }
-
-    /*
-      중간 단계에서도 높이 편차가 작은 후보만 유지.
-      완성 단계에서는 아래에서 다시 정확히 최종 평가한다.
-    */
-    nextCandidates.sort(
-      (a, b) =>
-        getLayoutScore(
-          a.heights,
-        ) -
-        getLayoutScore(
-          b.heights,
-        ),
-    );
-
-    candidates =
-      nextCandidates.slice(
-        0,
-        BEAM_WIDTH,
-      );
-  }
-
-  if (
-    candidates.length === 0
-  ) {
-    /*
-      혹시 모를 fallback.
-    */
-    const columns =
-      Array.from(
-        {
-          length:
-            safeColumnCount,
-        },
-        () => [] as FeedItem[],
-      );
-
-    const heights =
-      Array.from(
-        {
-          length:
-            safeColumnCount,
-        },
-        () => 0,
-      );
-
-    for (
-      const item of
-        placementOrder
-    ) {
-      let shortestIndex =
-        0;
-
-      for (
-        let index = 1;
-        index <
-        safeColumnCount;
-        index += 1
-      ) {
-        if (
-          heights[index] <
-          heights[
-            shortestIndex
-          ]
-        ) {
-          shortestIndex =
-            index;
-        }
-      }
-
-      columns[
-        shortestIndex
-      ].push(
-        item.work,
-      );
-
-      heights[
-        shortestIndex
-      ] +=
-        item.height +
-        masonryGap;
-    }
-
-    return {
-      columns,
-    };
-  }
-
-  candidates.sort(
-    (a, b) =>
-      getLayoutScore(
-        a.heights,
-      ) -
-      getLayoutScore(
-        b.heights,
-      ),
-  );
-
-  const best =
-    candidates[0];
-
-  /*
-    각 컬럼 안에서는 원래 Discover Set의 순서를
-    최대한 유지해서 화면이 지나치게 랜덤해 보이지 않게 한다.
-  */
-  const originalOrder =
-    new Map(
-      works.map(
-        (work, index) => [
-          work.id,
-          index,
-        ],
-      ),
-    );
-
-  const orderedColumns =
-    best.columns.map(
-      (column) =>
-        [...column].sort(
-          (a, b) =>
-            (originalOrder.get(
-              a.id,
-            ) ?? 0) -
-            (originalOrder.get(
-              b.id,
-            ) ?? 0),
-        ),
-    );
-
-  return {
-    columns:
-      orderedColumns,
-  };
-}
-
-function countUniqueArtists(works: FeedItem[]) {
-  return new Set(works.map((work) => work.artistId)).size;
-}
-
-function addWorksFromPool({
-  pool,
-  result,
-  targetCount,
-  artistLimit,
-  recentArtistIds,
-  avoidRecentArtists,
-}: {
-  pool: FeedItem[];
-  result: FeedItem[];
-  targetCount: number;
-  artistLimit: number;
-  recentArtistIds: Set<string>;
-  avoidRecentArtists: boolean;
-}) {
-  if (result.length >= targetCount) return;
-
-  const usedWorkIds = new Set(result.map((work) => work.id));
-  const artistCounts = new Map<string, number>();
-
-  for (const work of result) {
-    artistCounts.set(work.artistId, (artistCounts.get(work.artistId) ?? 0) + 1);
-  }
-
-  for (const work of shuffleWorks(pool)) {
-    if (result.length >= targetCount) break;
-    if (usedWorkIds.has(work.id)) continue;
-    if (avoidRecentArtists && recentArtistIds.has(work.artistId)) continue;
-
-    const currentArtistCount = artistCounts.get(work.artistId) ?? 0;
-    if (currentArtistCount >= artistLimit) continue;
-
-    result.push(work);
-    usedWorkIds.add(work.id);
-    artistCounts.set(work.artistId, currentArtistCount + 1);
-  }
-}
-
-function buildDiscoverSet(
-  works: FeedItem[],
-  recentArtists: string[],
-) {
-  if (works.length === 0) return [];
-
-  const targetCount = Math.min(
-    DISCOVER_SET_SIZE,
-    works.length,
-  );
-  const recentArtistIds = new Set(
-    recentArtists,
-  );
-  const uniqueArtistCount = Math.max(
-    1,
-    countUniqueArtists(works),
-  );
-  const maxArtistLimit = Math.max(
-    1,
-    Math.ceil(
-      targetCount / uniqueArtistCount,
-    ) + 2,
-  );
-
-  for (
-    let artistLimit = 1;
-    artistLimit <= maxArtistLimit;
-    artistLimit += 1
-  ) {
-    const result: FeedItem[] = [];
-
-    addWorksFromPool({
-      pool: works,
-      result,
-      targetCount,
-      artistLimit,
-      recentArtistIds,
-      avoidRecentArtists: true,
-    });
-
-    addWorksFromPool({
-      pool: works,
-      result,
-      targetCount,
-      artistLimit,
-      recentArtistIds,
-      avoidRecentArtists: false,
-    });
-
-    if (result.length >= targetCount) {
-      return shuffleWorks(
-        result,
-      ).slice(0, targetCount);
-    }
-  }
-
-  const fallback: FeedItem[] = [];
-
-  addWorksFromPool({
-    pool: works,
-    result: fallback,
-    targetCount,
-    artistLimit: DISCOVER_SET_SIZE,
-    recentArtistIds,
-    avoidRecentArtists: false,
-  });
-
-  return shuffleWorks(
-    fallback,
-  ).slice(0, targetCount);
-}
-
-function mergeUniqueWorks(
-  current: FeedItem[],
-  incoming: FeedItem[],
-) {
-  return Array.from(
-    new Map(
-      [
-        ...current,
-        ...incoming,
-      ].map((work) => [
-        work.id,
-        work,
-      ]),
-    ).values(),
-  );
-}
-
-export default function DiscoverFeed({ works }: DiscoverFeedProps) {
-    const router = useRouter();
-    const supabase = useMemo(
+export default function DiscoverFeed({
+  works: _initialWorks,
+}: DiscoverFeedProps) {
+  const { t } = useTranslation();
+  const supabase = useMemo(
     () => createClient(),
     [],
-    
   );
 
-  const [
-  pickPanelAddedCount,
-  setPickPanelAddedCount,
-] = useState(0);
+  const [selectedCategories, setSelectedCategories] =
+    useState<Set<CreatorCategory>>(
+      () => createAllSelectedCategories(),
+    );
 
-const [
-  pickPanelPulseKey,
-  setPickPanelPulseKey,
-] = useState(0);
-const [
-  pickPanelRefreshKey,
-  setPickPanelRefreshKey,
-] = useState(0);
-const [
-  mobilePicksOpen,
-  setMobilePicksOpen,
-] = useState(false);
-  const [pendingPickWork, setPendingPickWork] =
-  useState<FeedItem | null>(null);
-  const [showLogin, setShowLogin] =
+  const categorySignature = useMemo(
+    () =>
+      buildDiscoverCategorySignature(
+        selectedCategories,
+      ),
+    [selectedCategories],
+  );
+
+  const isAllActive = isAllDiscoverCategoriesSelected(
+    selectedCategories,
+  );
+
+  const feed = useDiscoverFeed(categorySignature);
+
+  const categoryButtonClass = (isActive: boolean) =>
+    `rounded-sm border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition md:px-3 md:py-1.5 md:text-xs ${
+      isActive
+        ? "border-white/75 text-white"
+        : "border-transparent text-white/35 hover:border-white/20 hover:text-white/70"
+    }`;
+
+  const [pickPanelAddedCount] = useState(0);
+  const [pickPanelPulseKey] = useState(0);
+  const [pickPanelRefreshKey, setPickPanelRefreshKey] =
+    useState(0);
+  const [mobilePicksOpen, setMobilePicksOpen] =
     useState(false);
+  const [pendingPickWork, setPendingPickWork] =
+    useState<FeedItem | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
   const [currentUserId, setCurrentUserId] =
     useState<string | null>(null);
-  const [activeTypes, setActiveTypes] =
-    useState<DiscoverType[]>(
-      DEFAULT_ACTIVE_TYPES,
-    );
-  const [
-    candidateWorks,
-    setCandidateWorks,
-  ] = useState<FeedItem[]>(
-    works,
-  );
-  const [displayWorks, setDisplayWorks] = useState<FeedItem[]>([]);
-  const [isInitializing, setIsInitializing] =
-    useState(true);
-  const [selectedWork, setSelectedWork] = useState<FeedItem | null>(null);
-  const [pickedWorkIds, setPickedWorkIds] = useState<Set<string>>(new Set());
-  const [transitionStage, setTransitionStage] =
-    useState<TransitionStage>("idle");
-
-  const recentArtistsRef = useRef<string[]>([]);
-  const shownWorkIdsRef =
-    useRef<Set<string>>(
-      new Set(),
-    );
-  const candidateWorksRef =
-    useRef<FeedItem[]>(works);
-  const pickedWorkIdsRef =
-    useRef<Set<string>>(
-      new Set(),
-    );
-  const candidateRoundsRef =
-    useRef<
-      Record<TypesSignature, number>
-    >({});
-  const exhaustedSignaturesRef =
-    useRef<
-      Set<TypesSignature>
-    >(new Set());
-  const workPageCycleRef =
-    useRef<
-      Partial<
-        Record<
-          TypesSignature,
-          WorkPageCycleState
-        >
-      >
-    >({});
-  const refillPromisesRef =
-    useRef<
-      Partial<
-        Record<
-          TypesSignature,
-          Promise<void>
-        >
-      >
-    >({});
-  const typesSeedsRef =
-    useRef<
-      Partial<
-        Record<TypesSignature, string>
-      >
-    >({});
-  const applyingSetRef =
-    useRef(false);
-  const filterChangeInFlightRef =
-    useRef(false);
-  const feedTopRef = useRef<HTMLDivElement | null>(null);
-  const masonryRef = useRef<HTMLDivElement | null>(null);
-
-  const [
-    masonryWidth,
-    setMasonryWidth,
-  ] = useState(0);
-
-  const [
-    imageRatios,
-    setImageRatios,
-  ] = useState<Record<string, number>>({});
-
-  const columnCount =
-    getResponsiveColumnCount(
-      masonryWidth,
-    );
-
-  const masonryGap =
-    getResponsiveMasonryGap(
-      masonryWidth,
-    );
-
-  const columnWidth =
-    columnCount > 0 &&
-    masonryWidth > 0
-      ? (
-          masonryWidth -
-          masonryGap *
-            (columnCount - 1)
-        ) /
-        columnCount
-      : 280;
-
-  const balancedLayout =
-    useMemo(
-      () =>
-        buildBalancedLayout(
-          displayWorks,
-          columnCount,
-          columnWidth,
-          imageRatios,
-          masonryGap,
-        ),
-      [
-        displayWorks,
-        columnCount,
-        columnWidth,
-        imageRatios,
-        masonryGap,
-      ],
-    );
-
-  const activeTypesRef =
-    useRef(activeTypes);
+  const [selectedWork, setSelectedWork] =
+    useState<FeedItem | null>(null);
+  const [pickedWorkIds, setPickedWorkIds] =
+    useState<Set<string>>(new Set());
 
   useEffect(() => {
-    activeTypesRef.current =
-      activeTypes;
-  }, [activeTypes]);
+    async function loadPicks() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-  function getAvailableCandidates() {
-    return filterWorksByActiveTypes(
-      candidateWorksRef.current.filter(
-        (work) =>
-          !pickedWorkIdsRef.current.has(
-            work.id,
-          ) &&
-          !shownWorkIdsRef.current.has(
-            work.id,
-          ),
-      ),
-      activeTypesRef.current,
-    );
-  }
-
-  function markWorksShown(
-    nextSet: FeedItem[],
-  ) {
-    for (const work of nextSet) {
-      shownWorkIdsRef.current.add(
-        work.id,
-      );
-    }
-  }
-
-  const lastTrackedSetSignatureRef =
-    useRef("");
-
-  function trackDiscoverSetViewIfNew(
-    nextSet: FeedItem[],
-    types: DiscoverType[],
-  ) {
-    if (nextSet.length === 0) {
-      return;
-    }
-
-    const signature = nextSet
-      .map((work) => work.id)
-      .sort()
-      .join(",");
-
-    if (
-      !signature ||
-      signature ===
-        lastTrackedSetSignatureRef.current
-    ) {
-      return;
-    }
-
-    lastTrackedSetSignatureRef.current =
-      signature;
-
-    trackProductEvent({
-      event_name: "discover_set_view",
-      metadata: {
-        types: types.join(","),
-        count: nextSet.length,
-      },
-    });
-  }
-
-  function applyCandidateBatch(
-    signature: TypesSignature,
-    data: CandidateBatchResponse,
-  ) {
-    const incoming =
-      Array.isArray(data.works)
-        ? data.works
-        : [];
-    const reusedInitialBatch =
-      data.reusedInitialBatch ===
-      true;
-
-    if (!reusedInitialBatch) {
-      candidateWorksRef.current =
-        mergeUniqueWorks(
-          candidateWorksRef.current,
-          incoming,
-        );
-    }
-
-    const artistPageCount =
-      typeof data.artistPageCount ===
-      "number"
-        ? data.artistPageCount
-        : 1;
-    const artistPage =
-      typeof data.artistPage ===
-      "number"
-        ? data.artistPage
-        : 0;
-    const workPage =
-      typeof data.workPage ===
-      "number"
-        ? data.workPage
-        : 0;
-    const incomingCount =
-      reusedInitialBatch
-        ? filterWorksByActiveTypes(
-            candidateWorksRef.current,
-            activeTypesRef.current,
-          ).length
-        : incoming.length;
-
-    updateWorkPageCycleExhaustion(
-      signature,
-      artistPage,
-      artistPageCount,
-      workPage,
-      incomingCount,
-      workPageCycleRef,
-      exhaustedSignaturesRef,
-    );
-
-    candidateRoundsRef.current[
-      signature
-    ] =
-      typeof data.nextRound ===
-      "number"
-        ? data.nextRound
-        : (candidateRoundsRef
-            .current[signature] ??
-            1) + 1;
-  }
-
-  async function fetchCandidateBatch(
-    types: DiscoverType[],
-    round: number,
-    allowReuseRound0 = false,
-  ) {
-    const signature =
-      getTypesSignature(types);
-    const seed =
-      getOrCreateTypesSeed(
-        signature,
-        typesSeedsRef.current,
-      );
-
-    const reuseParam =
-      allowReuseRound0
-        ? "&allowReuseRound0=true"
-        : "";
-
-    const response = await fetch(
-      `/api/discover/candidates?types=${encodeURIComponent(
-        types.join(","),
-      )}&round=${round}&seed=${encodeURIComponent(
-        seed,
-      )}${reuseParam}`,
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        await response.text(),
-      );
-    }
-
-    return (await response.json()) as CandidateBatchResponse;
-  }
-
-  async function bootstrapInitialSeededCandidates(
-    types: DiscoverType[],
-    allowReuseRound0 = false,
-  ) {
-    const signature =
-      getTypesSignature(types);
-
-    if (
-      !candidateRoundsRef.current[
-        signature
-      ]
-    ) {
-      candidateRoundsRef.current[
-        signature
-      ] = 1;
-    }
-
-    try {
-      const data =
-        await fetchCandidateBatch(
-          types,
-          1,
-          allowReuseRound0,
-        );
-
-      applyCandidateBatch(
-        signature,
-        data,
-      );
-    } catch (error) {
-      console.error(
-        "BOOTSTRAP DISCOVER CANDIDATES ERROR:",
-        signature,
-        error,
-      );
-    }
-
-    setCandidateWorks(
-      candidateWorksRef.current,
-    );
-  }
-
-  async function refillCandidates(
-    types: DiscoverType[],
-  ) {
-    const signature =
-      getTypesSignature(types);
-
-    const existing =
-      refillPromisesRef.current[
-        signature
-      ];
-
-    if (existing) {
-      return existing;
-    }
-
-    if (
-      !candidateRoundsRef.current[
-        signature
-      ]
-    ) {
-      candidateRoundsRef.current[
-        signature
-      ] = 1;
-    }
-
-    const refillPromise =
-      (async () => {
-        const round =
-          candidateRoundsRef.current[
-            signature
-          ];
-
-        try {
-          const data =
-            await fetchCandidateBatch(
-              types,
-              round,
-            );
-
-          applyCandidateBatch(
-            signature,
-            data,
-          );
-
-          setCandidateWorks(
-            candidateWorksRef.current,
-          );
-        } catch (error) {
-          console.error(
-            "REFILL DISCOVER CANDIDATES ERROR:",
-            error,
-          );
-        }
-      })().finally(() => {
-        delete refillPromisesRef.current[
-          signature
-        ];
-      });
-
-    refillPromisesRef.current[
-      signature
-    ] = refillPromise;
-
-    return refillPromise;
-  }
-
-  function countAvailableCandidates() {
-    return getAvailableCandidates().length;
-  }
-
-  function maybePrefetchCandidates(
-    types: DiscoverType[],
-  ) {
-    const signature =
-      getTypesSignature(types);
-
-    if (
-      exhaustedSignaturesRef.current.has(
-        signature,
-      )
-    ) {
-      return;
-    }
-
-    if (
-      countAvailableCandidates() <=
-      CANDIDATE_PREFETCH_THRESHOLD
-    ) {
-      void refillCandidates(types);
-    }
-  }
-
-  async function ensureCandidatePool(
-    types: DiscoverType[],
-  ) {
-    maybePrefetchCandidates(types);
-
-    if (
-      createNextSet(types).length >=
-      DISCOVER_SET_SIZE
-    ) {
-      return;
-    }
-
-    const signature =
-      getTypesSignature(types);
-
-    if (
-      exhaustedSignaturesRef.current.has(
-        signature,
-      )
-    ) {
-      return;
-    }
-
-    const inFlight =
-      refillPromisesRef.current[
-        signature
-      ];
-
-    if (inFlight) {
-      await inFlight;
-    }
-
-    if (
-      createNextSet(types).length >=
-      DISCOVER_SET_SIZE
-    ) {
-      return;
-    }
-
-    if (
-      countAvailableCandidates() <
-      CANDIDATE_REFILL_THRESHOLD
-    ) {
-      await refillCandidates(types);
-    }
-  }
-
-  function recycleShownCandidates(
-    types: DiscoverType[],
-  ) {
-    const currentIds = new Set(
-      displayWorks.map(
-        (work) => work.id,
-      ),
-    );
-
-    for (
-      const work of
-        candidateWorksRef.current
-    ) {
-      if (
-        workMatchesActiveTypes(
-          work,
-          types,
-        ) &&
-        !currentIds.has(work.id)
-      ) {
-        shownWorkIdsRef.current.delete(
-          work.id,
-        );
+      if (!user) {
+        setCurrentUserId(null);
+        setPickedWorkIds(new Set());
+        return;
       }
-    }
-  }
 
-  function createNextSet(
-    types: DiscoverType[],
-  ) {
-    let nextSet =
-      buildDiscoverSet(
-        getAvailableCandidates(),
-        recentArtistsRef.current,
-      );
-
-    if (
-      nextSet.length <
-      DISCOVER_SET_SIZE
-    ) {
-      recycleShownCandidates(types);
-
-      nextSet = buildDiscoverSet(
-        getAvailableCandidates(),
-        recentArtistsRef.current,
-      );
-    }
-
-    return nextSet;
-  }
-
-  function ensureCandidateRoundForTypes(
-    types: DiscoverType[],
-  ) {
-    const signature =
-      getTypesSignature(types);
-
-    if (
-      !candidateRoundsRef.current[
-        signature
-      ]
-    ) {
-      candidateRoundsRef.current[
-        signature
-      ] = 1;
-    }
-  }
-
- async function applyNewSet(
-  types: DiscoverType[],
-  scrollToTop = false,
-) {
-  if (applyingSetRef.current) {
-    return;
-  }
-
-  applyingSetRef.current = true;
-
-  try {
-    await ensureCandidatePool(
-      types,
-    );
-
-    const nextSet = createNextSet(
-      types,
-    );
-
-    setDisplayWorks(nextSet);
-    markWorksShown(nextSet);
-    trackDiscoverSetViewIfNew(
-      nextSet,
-      types,
-    );
-   
-
-    const nextArtistIds = Array.from(
-      new Set(nextSet.map((work) => work.artistId)),
-    );
-
-    recentArtistsRef.current = [
-      ...recentArtistsRef.current,
-      ...nextArtistIds,
-    ].slice(-RECENT_ARTIST_HISTORY_LIMIT);
-
-    if (scrollToTop) {
-      requestAnimationFrame(() => {
-        feedTopRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      });
-    }
-
-    maybePrefetchCandidates(
-      types,
-    );
-  } finally {
-    applyingSetRef.current = false;
-  }
-  }
-
- useEffect(() => {
-  async function initializeDiscover() {
-    setIsInitializing(true);
-
-    try {
-    recentArtistsRef.current = [];
-    shownWorkIdsRef.current =
-      new Set();
-    candidateWorksRef.current =
-      works;
-    setCandidateWorks(works);
-    candidateRoundsRef.current = {};
-    exhaustedSignaturesRef.current =
-      new Set();
-    workPageCycleRef.current = {};
-    refillPromisesRef.current = {};
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    let loadedPickedIds =
-      new Set<string>();
-
-    if (user) {
       setCurrentUserId(user.id);
 
-      const { data, error } =
-        await supabase
-          .from("work_picks")
-          .select("work_id")
-          .eq("user_id", user.id);
+      const { data, error } = await supabase
+        .from("work_picks")
+        .select("work_id")
+        .eq("user_id", user.id);
 
       if (error) {
-        console.error(
-          "LOAD PICKS ERROR:",
-          error,
-        );
-      } else {
-        loadedPickedIds =
-          new Set(
-            (data ?? []).map(
-              (item) =>
-                String(item.work_id),
-            ),
-          );
-
-        setPickedWorkIds(
-          loadedPickedIds,
-        );
-        pickedWorkIdsRef.current =
-          loadedPickedIds;
+        console.error("LOAD PICKS ERROR:", error);
+        return;
       }
-    } else {
-      setCurrentUserId(null);
+
       setPickedWorkIds(
-        new Set(),
-      );
-      pickedWorkIdsRef.current =
-        new Set();
-    }
-
-    const initialTypes =
-      readStoredDiscoverTypes();
-
-    setActiveTypes(initialTypes);
-    saveDiscoverTypes(initialTypes);
-    ensureCandidateRoundForTypes(
-      initialTypes,
-    );
-
-    await bootstrapInitialSeededCandidates(
-      initialTypes,
-      isAllTypesActive(initialTypes),
-
-    );
-
-    const availableWorks =
-      filterWorksByActiveTypes(
-        candidateWorksRef.current.filter(
-          (work) =>
-            !loadedPickedIds.has(
-              work.id,
-            ),
-        ),
-        initialTypes,
-      );
-
-    const initialSet =
-      buildDiscoverSet(
-        availableWorks,
-        [],
-      );
-
-    setDisplayWorks(
-      initialSet,
-    );
-    markWorksShown(
-      initialSet,
-    );
-    trackDiscoverSetViewIfNew(
-      initialSet,
-      initialTypes,
-    );
-
-    recentArtistsRef.current =
-      Array.from(
         new Set(
-          initialSet.map(
-            (work) =>
-              work.artistId,
+          (data ?? []).map((item) =>
+            String(item.work_id),
           ),
         ),
-      ).slice(
-        -RECENT_ARTIST_HISTORY_LIMIT,
       );
-
-    maybePrefetchCandidates(
-      initialTypes,
-    );
-    } finally {
-      setIsInitializing(false);
-    }
-  }
-
-  initializeDiscover();
-}, [works, supabase]);
-
-  useEffect(() => {
-    pickedWorkIdsRef.current =
-      pickedWorkIds;
-  }, [pickedWorkIds]);
-
-  useEffect(() => {
-    const container =
-      masonryRef.current;
-
-    if (!container) {
-      return;
     }
 
-    const updateWidth = () => {
-      setMasonryWidth(
-        container.getBoundingClientRect()
-          .width,
-      );
-    };
-
-    updateWidth();
-
-    const observer =
-      new ResizeObserver(
-        updateWidth,
-      );
-
-    observer.observe(
-      container,
-    );
-
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
+    void loadPicks();
+  }, [supabase]);
 
   function closeWorkModalFromHistory() {
     setSelectedWork(null);
-
-    setPickPanelRefreshKey(
-      (current) => current + 1,
-    );
+    setPickPanelRefreshKey((current) => current + 1);
   }
 
   const { requestClose: requestCloseWorkModal } =
@@ -1769,7 +146,9 @@ const [
     );
 
   useEffect(() => {
-    if (!selectedWork) return;
+    if (!selectedWork) {
+      return;
+    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -1786,933 +165,239 @@ const [
     };
   }, [selectedWork, requestCloseWorkModal]);
 
-  async function applyTypeFilterChange(
-    nextTypes: DiscoverType[],
-  ) {
-    if (filterChangeInFlightRef.current) {
-      return;
-    }
+  async function togglePick(work: FeedItem) {
+    let userId = currentUserId;
 
-    filterChangeInFlightRef.current =
-      true;
+    if (!userId) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    try {
-      const normalized =
-        normalizeActiveTypes(
-          nextTypes,
-        );
-      const signature =
-        getTypesSignature(
-          normalized,
-        );
-      const isNewSignature =
-        candidateRoundsRef.current[
-          signature
-        ] === undefined;
-
-      activeTypesRef.current =
-        normalized;
-      setActiveTypes(normalized);
-      saveDiscoverTypes(normalized);
-
-      if (isNewSignature) {
-        candidateRoundsRef.current[
-          signature
-        ] = 1;
-
-        await bootstrapInitialSeededCandidates(
-          normalized,
-        );
-      }
-
-      setCandidateWorks(
-        candidateWorksRef.current,
-      );
-
-      await applyNewSet(
-        normalized,
-        false,
-      );
-    } finally {
-      filterChangeInFlightRef.current =
-        false;
-    }
-  }
-
-  function handleAllClick() {
-    if (
-      transitionStage !== "idle" ||
-      applyingSetRef.current ||
-      filterChangeInFlightRef.current
-    ) {
-      return;
-    }
-
-    if (isAllTypesActive(activeTypes)) {
-      return;
-    }
-
-    void applyTypeFilterChange(
-      DEFAULT_ACTIVE_TYPES,
-    );
-  }
-
-  function handleTypeToggle(
-    type: DiscoverType,
-  ) {
-    if (
-      transitionStage !== "idle" ||
-      applyingSetRef.current ||
-      filterChangeInFlightRef.current
-    ) {
-      return;
-    }
-
-    const isActive =
-      activeTypes.includes(type);
-
-    if (isActive) {
-      if (activeTypes.length <= 1) {
+      if (!user) {
+        setPendingPickWork(work);
+        setShowLogin(true);
         return;
       }
 
-      void applyTypeFilterChange(
-        activeTypes.filter(
-          (item) => item !== type,
-        ),
-      );
-      return;
+      userId = user.id;
+      setCurrentUserId(user.id);
     }
 
-    void applyTypeFilterChange([
-      ...activeTypes,
-      type,
-    ]);
-  }
+    const alreadyPicked = pickedWorkIds.has(work.id);
 
-  function handleNext() {
-  if (
-    transitionStage !== "idle" ||
-    applyingSetRef.current
-  ) {
-    return;
-  }
-
-  trackProductEvent({
-    event_name: "pass_next",
-    metadata: {
-      action: hasPicks ? "next" : "pass",
-    },
-  });
-
-  if (currentSetPickedCount > 0) {
-  setPickPanelAddedCount(
-    currentSetPickedCount,
-  );
-
-  setPickPanelPulseKey(
-    (current) =>
-      current + 1,
-  );
-}
-
-  // 1. Pick하지 않은 카드 먼저 사라짐
-  setTransitionStage("unpicked-out");
-
-  // 2. Pick한 카드가 조금 늦게 사라짐
-  window.setTimeout(() => {
-    setTransitionStage("picked-out");
-  }, 120);
-
-  // 3. 모든 카드가 사라진 뒤 다음 Set 생성
-  window.setTimeout(() => {
-    void (async () => {
-      applyingSetRef.current =
-        true;
-
-      try {
-        await ensureCandidatePool(
-          activeTypes,
-        );
-
-        const nextSet =
-          createNextSet(
-            activeTypes,
-          );
-
-        const nextArtistIds =
-          Array.from(
-            new Set(
-              nextSet.map(
-                (work) =>
-                  work.artistId,
-              ),
-            ),
-          );
-
-        recentArtistsRef.current = [
-          ...recentArtistsRef.current,
-          ...nextArtistIds,
-        ].slice(
-          -RECENT_ARTIST_HISTORY_LIMIT,
-        );
-
-        setDisplayWorks(nextSet);
-        markWorksShown(nextSet);
-        trackDiscoverSetViewIfNew(
-          nextSet,
-          activeTypes,
-        );
-        setTransitionStage(
-          "entering",
-        );
-
-        requestAnimationFrame(() => {
-          feedTopRef.current?.scrollIntoView({
-            behavior: "auto",
-            block: "start",
-          });
-        });
-
-        window.setTimeout(() => {
-          setTransitionStage(
-            "idle",
-          );
-        },240);
-
-        maybePrefetchCandidates(
-          activeTypes,
-        );
-      } finally {
-        applyingSetRef.current =
-          false;
-      }
-    })();
-  }, 30);
-}
-
-
- async function togglePick(
-  work: FeedItem,
-) {
-  let userId =
-    currentUserId;
-
-  // 평소 Pick에서는 currentUserId를 바로 사용.
-  // 로그인 직후처럼 state 반영 전인 경우에만
-  // Supabase Auth를 한 번 확인한다.
-  if (!userId) {
-    const {
-      data: { user },
-    } =
-      await supabase.auth.getUser();
-
-    if (!user) {
-      setPendingPickWork(work);
-      setShowLogin(true);
-      return;
-    }
-
-    userId = user.id;
-    setCurrentUserId(user.id);
-  }
-
-  const alreadyPicked =
-    pickedWorkIds.has(
-      work.id,
-    );
-
-  if (alreadyPicked) {
-    // Optimistic UI:
-    // Supabase 응답을 기다리지 않고
-    // 화면에서 먼저 Pick 해제
-    setPickedWorkIds(
-      (current) => {
-        const next =
-          new Set(current);
-
-        next.delete(
-          work.id,
-        );
-
+    if (alreadyPicked) {
+      setPickedWorkIds((current) => {
+        const next = new Set(current);
+        next.delete(work.id);
         return next;
-      },
-    );
-
-    const { error } =
-      await supabase
-        .from("work_picks")
-        .delete()
-        .eq(
-          "user_id",
-          userId,
-        )
-        .eq(
-          "work_id",
-          work.id,
-        );
-
-    if (error) {
-      console.error(
-        "REMOVE PICK ERROR:",
-        error,
-      );
-
-      // 실패하면 원래 Pick 상태로 복구
-      setPickedWorkIds(
-        (current) => {
-          const next =
-            new Set(current);
-
-          next.add(
-            work.id,
-          );
-
-          return next;
-        },
-      );
-    }
-
-    return;
-  }
-
-  // Optimistic UI:
-  // Supabase 응답을 기다리지 않고
-  // 화면에서 먼저 Pick 처리
-  setPickedWorkIds(
-    (current) => {
-      const next =
-        new Set(current);
-
-      next.add(
-        work.id,
-      );
-
-      return next;
-    },
-  );
-
-  const { error } =
-    await supabase
-      .from("work_picks")
-      .insert({
-        user_id:
-          userId,
-
-        work_id:
-          work.id,
-
-        artist_id:
-          work.artistId,
       });
 
-  if (error) {
-    console.error(
-      "SAVE PICK ERROR:",
-      error,
-    );
+      const { error } = await supabase
+        .from("work_picks")
+        .delete()
+        .eq("user_id", userId)
+        .eq("work_id", work.id);
 
-    // 저장 실패하면 Pick 상태 원복
-    setPickedWorkIds(
-      (current) => {
-        const next =
-          new Set(current);
-
-        next.delete(
-          work.id,
-        );
-
-        return next;
-      },
-    );
-
-    return;
-  }
-
-  trackProductEvent({
-    event_name: "pick",
-    artist_id: work.artistId,
-    work_id: work.id,
-  });
-
-  setPickPanelRefreshKey(
-    (current) => current + 1,
-  );
-}
-function handleViewArtistProfile(
-  event: React.MouseEvent<HTMLAnchorElement>,
-  artistId: string,
-) {
-  event.preventDefault();
-
-  setSelectedWork(null);
-  setPickPanelRefreshKey(
-    (current) => current + 1,
-  );
-
-  router.replace(
-    `/creator/${artistId}`,
-  );
-}
-
-function openPickedWork(
-  pickedWork: Parameters<
-    NonNullable<
-      React.ComponentProps<
-        typeof MyPicksPanel
-      >["onWorkClick"]
-    >
-  >[0],
-) {
-  const workId = String(pickedWork.id);
-
-  setPickedWorkIds((current) => {
-    const next = new Set(current);
-    next.add(workId);
-    return next;
-  });
-
-  const work = candidateWorks.find(
-    (item) =>
-      String(item.id) === workId,
-  );
-
-  if (work) {
-    setSelectedWork(work);
-    return;
-  }
-
-  setSelectedWork({
-    id: workId,
-    artistId: pickedWork.artistId,
-    artistName: pickedWork.artistName,
-    category:
-      pickedWork.category ?? "",
-    type: pickedWork.type,
-    image: pickedWork.image,
-    videoId: pickedWork.videoId,
-    caption: pickedWork.caption,
-    sourceUrl: pickedWork.sourceUrl,
-  });
-}
-
-  const currentSetPickedCount =
-  displayWorks.filter((work) =>
-    pickedWorkIds.has(work.id),
-  ).length;
-
-  const hasPicks =
-  currentSetPickedCount > 0;
-
-  function getCardTransitionClass(
-  workId: string,
-) {
-  const picked =
-    pickedWorkIds.has(workId);
-
-  if (
-    transitionStage ===
-    "unpicked-out"
-  ) {
-    return picked
-      ? "opacity-100 scale-[1.035] -translate-y-1"
-      : "pointer-events-none opacity-100 scale-[0.96] translate-y-2";
-  }
-
-  if (
-    transitionStage ===
-    "picked-out"
-  ) {
-    return picked
-      ? "pointer-events-none opacity-100 scale-[1.06] -translate-y-2"
-      : "pointer-events-none opacity-100 scale-[0.96] translate-y-2";
-  }
-
-  if (
-    transitionStage ===
-    "entering"
-  ) {
-    return "pointer-events-none opacity-100 scale-100 translate-y-0";
-  }
-
-  return "opacity-100 scale-100 translate-y-0";
-}
-
-  const skeletonColumns =
-    useMemo(() => {
-      const columns = Array.from(
-        {
-          length: Math.max(
-            1,
-            columnCount,
-          ),
-        },
-        () =>
-          [] as number[],
-      );
-
-      for (
-        let index = 0;
-        index <
-        DISCOVER_SET_SIZE;
-        index += 1
-      ) {
-        columns[
-          index % columns.length
-        ].push(
-          VIDEO_HEIGHTS[
-            index %
-              VIDEO_HEIGHTS.length
-          ],
-        );
+      if (error) {
+        console.error("REMOVE PICK ERROR:", error);
+        setPickedWorkIds((current) => {
+          const next = new Set(current);
+          next.add(work.id);
+          return next;
+        });
+      } else {
+        trackProductEvent({
+          event_name: "save",
+          artist_id: work.artistId,
+          work_id: work.id,
+          metadata: {
+            action: "unsave",
+          },
+        });
+        setPickPanelRefreshKey((current) => current + 1);
       }
 
-      return columns;
-    }, [columnCount]);
+      return;
+    }
+
+    setPickedWorkIds((current) => {
+      const next = new Set(current);
+      next.add(work.id);
+      return next;
+    });
+
+    const { error } = await supabase.from("work_picks").insert({
+      user_id: userId,
+      work_id: work.id,
+      artist_id: work.artistId,
+    });
+
+    if (error) {
+      console.error("SAVE PICK ERROR:", error);
+      setPickedWorkIds((current) => {
+        const next = new Set(current);
+        next.delete(work.id);
+        return next;
+      });
+      return;
+    }
+
+    trackProductEvent({
+      event_name: "save",
+      artist_id: work.artistId,
+      work_id: work.id,
+      metadata: {
+        action: "save",
+      },
+    });
+    setPickPanelRefreshKey((current) => current + 1);
+  }
+
+  function savedPanelWorkToFeedItem(
+    work: SavedPanelWork,
+  ): FeedItem {
+    return {
+      id: work.id,
+      artistId: work.artistId,
+      artistName: work.artistName,
+      category: "",
+      type: work.type,
+      source: work.source,
+      image: work.image,
+      videoId: work.videoId,
+      caption: work.caption,
+      sourceUrl: work.sourceUrl,
+    };
+  }
+
+  function openWork(work: FeedItem) {
+    setSelectedWork(work);
+
+    trackProductEvent({
+      event_name: "card_open",
+      work_id: work.id,
+      metadata: {
+        source: getAnalyticsSource(work),
+      },
+    });
+  }
+
+  function openPickedWork(work: SavedPanelWork) {
+    const fromFeed = feed.works.find(
+      (item) => item.id === work.id,
+    );
+
+    openWork(fromFeed ?? savedPanelWorkToFeedItem(work));
+  }
+
+  function handlePanelUnsave(work: SavedPanelWork) {
+    void togglePick(savedPanelWorkToFeedItem(work));
+  }
 
   return (
     <>
-      <nav className="border-b border-gray-100 bg-white py-3 md:py-4">
-        <div className="flex items-center gap-1 overflow-visible md:gap-2 md:overflow-x-auto md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden">
-          <span className="mr-1.5 shrink-0 whitespace-nowrap border-b-2 border-fuchsia-600 pb-2 text-[12px] font-bold tracking-tight text-fuchsia-600 md:mr-3 md:text-[15px]">
-            DISCOVER
-          </span>
+      <p className="mt-1 mb-4 text-center text-xs text-zinc-500 md:mb-5 md:text-sm">
+        {t("discoverHint")}
+      </p>
 
+      <div className="w-full min-w-0 pt-8 md:pt-12">
+        <div className="mb-5 flex flex-wrap items-center gap-2 md:mb-6 md:gap-3">
           <button
             type="button"
-            onClick={handleAllClick}
-            className={`relative inline-flex h-[26px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 text-[10px] font-semibold transition md:h-7 md:px-3 md:text-[12px] ${
-              isAllTypesActive(activeTypes)
-                ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
-                : "border-gray-200 bg-white text-gray-500 hover:border-fuchsia-200 hover:bg-fuchsia-50 hover:text-fuchsia-700"
-            }`}
+            onClick={() =>
+              setSelectedCategories(
+                handleAllCategoryClick(
+                  selectedCategories,
+                ),
+              )
+            }
+            className={categoryButtonClass(
+              isAllActive,
+            )}
           >
             ALL
           </button>
 
-          {DISCOVER_TYPES.map((type) => {
-            const active =
-              activeTypes.includes(type);
+          {CREATOR_CATEGORY_OPTIONS.map((tab) => {
+            const isActive = selectedCategories.has(
+              tab.value,
+            );
 
             return (
               <button
-                key={type}
+                key={tab.value}
                 type="button"
                 onClick={() =>
-                  handleTypeToggle(type)
+                  setSelectedCategories(
+                    (current) =>
+                      handleCreatorCategoryClick(
+                        current,
+                        tab.value,
+                      ),
+                  )
                 }
-                className={`group relative inline-flex h-[26px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 text-[10px] font-semibold transition md:h-7 md:px-3 md:text-[12px] ${
-                  active
-                    ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
-                    : "border-gray-200 bg-white text-gray-500 hover:border-fuchsia-200 hover:bg-fuchsia-50 hover:text-fuchsia-700"
-                }`}
-              >
-                {DISCOVER_TYPE_LABELS[type]}
-                {active && (
-                  <span className="pointer-events-none absolute -right-0.5 -top-0.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-[9px] font-bold leading-none text-fuchsia-600 group-hover:flex">
-                    ×
-                  </span>
+                className={categoryButtonClass(
+                  isActive,
                 )}
+              >
+                {tab.label}
               </button>
             );
           })}
         </div>
-      </nav>
 
-      <div ref={feedTopRef} className="scroll-mt-6" />
-
-      <div
-        ref={masonryRef}
-        className="mt-4 pb-24"//discover 밑단 여백 조정
-      >
-        {isInitializing ? (
-          <div
-            className="grid items-start"
-            style={{
-              gridTemplateColumns: `repeat(${Math.max(1, columnCount)}, minmax(0, 1fr))`,
-              gap: `${masonryGap}px`,
-            }}
-          >
-            {skeletonColumns.map(
-              (
-                column,
-                columnIndex,
-              ) => (
-                <div
-                  key={`skeleton-column-${columnIndex}`}
-                  className="flex min-w-0 flex-col"
-                  style={{
-                    gap: `${masonryGap}px`,
-                  }}
-                >
-                  {column.map(
-                    (
-                      height,
-                      cardIndex,
-                    ) => (
-                      <div
-                        key={`skeleton-${columnIndex}-${cardIndex}`}
-                        className="w-full rounded-2xl bg-gray-100 animate-pulse"
-                        style={{
-                          height: `${height}px`,
-                        }}
-                      />
-                    ),
-                  )}
-                </div>
-              ),
-            )}
-          </div>
-        ) : displayWorks.length > 0 ? (
-          <div
-            className="grid items-start"
-            style={{
-              gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
-              gap: `${masonryGap}px`,
-            }}
-          >
-            {balancedLayout.columns.map(
-              (column, columnIndex) => (
-                <div
-                  key={`column-${columnIndex}`}
-                  className="flex min-w-0 flex-col"
-                  style={{
-                    gap: `${masonryGap}px`,
-                  }}
-                >
-                  {column.map((work) => {
-                    const isYoutube =
-                      work.type ===
-                        "youtube" &&
-                      Boolean(
-                        work.videoId,
-                      );
-                    const isPlayable =
-                      isPlayableVideo(
-                        work,
-                      );
-
-                    const thumbnail =
-                      getWorkThumbnail(
-                        work,
-                      );
-
-                    const baseHeight =
-                      estimateWorkHeight(
-                        work,
-                        columnWidth,
-                        imageRatios,
-                      );
-                    const cardHeight =
-                      Math.max(
-                        180,
-                        Math.round(
-                          baseHeight,
-                        ),
-                      );
-
-                    return (
-                      <div
-                        key={work.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          setSelectedWork(
-                            work,
-                          )
-                        }
-                        onKeyDown={(
-                          event,
-                        ) => {
-                          if (
-                            event.key ===
-                              "Enter" ||
-                            event.key ===
-                              " "
-                          ) {
-                            setSelectedWork(
-                              work,
-                            );
-                          }
-                        }}
-                        className={`group block w-full cursor-pointer text-left transition-all ease-out ${
-                          transitionStage === "unpicked-out" &&
-                          !pickedWorkIds.has(work.id)
-                            ? "duration-200"
-                            : transitionStage === "picked-out"
-                              ? "duration-300"
-                              : transitionStage === "entering"
-                                ? "duration-300"
-                                : "duration-300"
-                        } ${getCardTransitionClass(work.id)}`}
-                      >
-                        <article
-                          className={`relative rounded-2xl transition-all duration-300 ${
-                            pickedWorkIds.has(work.id)
-                              ? "bg-gradient-to-br from-fuchsia-500 via-purple-500 to-pink-500 p-[3px] shadow-[0_0_0_1px_rgba(217,70,239,0.15),0_8px_28px_rgba(217,70,239,0.28)]"
-                              : "bg-gray-100"
-                          }`}
-                        >
-                          <div
-                            className="relative w-full overflow-hidden rounded-[13px] bg-neutral-950"
-                            style={{
-                              height: `${cardHeight}px`,
-                            }}
-                          >
-                            {thumbnail ? (
-                              <img
-                                src={
-                                  thumbnail
-                                }
-                                alt={
-                                  isPlayable
-                                    ? `${work.artistName} video`
-                                    : `${work.artistName} work`
-                                }
-                                draggable={
-                                  false
-                                }
-                                referrerPolicy={
-                                  work.type ===
-                                  "tiktok"
-                                    ? "no-referrer"
-                                    : undefined
-                                }
-                                onLoad={(
-                                  event,
-                                ) => {
-                                  if (
-                                    isYoutube
-                                  ) {
-                                    return;
-                                  }
-
-                                  const image =
-                                    event.currentTarget;
-
-                                  if (
-                                    !image.naturalWidth ||
-                                    !image.naturalHeight
-                                  ) {
-                                    return;
-                                  }
-
-                                  const nextRatio =
-                                    image.naturalWidth /
-                                    image.naturalHeight;
-
-                                  setImageRatios(
-                                    (current) => {
-                                      if (
-                                        Math.abs(
-                                          (current[
-                                            work.id
-                                          ] ?? 0) -
-                                            nextRatio,
-                                        ) <
-                                        0.001
-                                      ) {
-                                        return current;
-                                      }
-
-                                      return {
-                                        ...current,
-                                        [work.id]:
-                                          nextRatio,
-                                      };
-                                    },
-                                  );
-                                }}
-                                className="h-full w-full object-cover transition duration-500 ease-out group-hover:scale-[1.02]"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-sm text-white/30">
-                                No thumbnail
-                              </div>
-                            )}
-
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-t from-black/75 via-black/25 to-transparent transition duration-300 group-hover:from-black/80" />
-
-                            {isPlayable && (
-                              <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-[10px] text-white/90 backdrop-blur-[2px] transition duration-300 group-hover:bg-black/65 group-hover:text-white md:right-3 md:top-3 md:h-8 md:w-8 md:text-[11px]">
-                                ▶
-                              </div>
-                            )}
-
-                            {pickedWorkIds.has(work.id) && (
-                              <div className="pointer-events-none absolute left-2 top-2 flex h-7 items-center justify-center gap-1 rounded-full bg-fuchsia-600 px-2.5 text-[10px] font-bold text-white shadow-lg md:left-3 md:top-3 md:h-8 md:px-3 md:text-[11px]">
-                                <span aria-hidden="true">✓</span>
-                                Picked
-                              </div>
-                            )}
-
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-white md:p-4">
-                              <h2 className="line-clamp-1 text-sm font-bold tracking-tight text-white md:text-base">
-                                {
-                                  work.artistName
-                                }
-                              </h2>
-                            </div>
-                          </div>
-                        </article>
-                      </div>
-                    );
-                  })}
-                </div>
-              ),
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">
-            No works yet.
-          </p>
-        )}
+        <DiscoverCarousel
+          key={categorySignature}
+          works={feed.works}
+          pickedWorkIds={pickedWorkIds}
+          isLoading={feed.isLoading}
+          isLoadingMore={feed.isLoadingMore}
+          onWorkClick={openWork}
+          onNearEnd={() => {
+            void feed.appendNextBatch();
+          }}
+          onPrune={feed.prune}
+        />
       </div>
 
-{displayWorks.length > 0 && (     //pass바 크기조정
-  <div className="fixed inset-x-0 bottom-0 z-50 border-t border-gray-100 bg-white/80 py-1.5 backdrop-blur-md">
-  <div className="relative flex items-center justify-center">
-    {hasPicks ? (
-      <span className="absolute right-[calc(50%+91px)] top-1/2 -translate-y-1/2 whitespace-nowrap text-sm font-semibold tracking-wide text-fuchsia-600">
-        Picked {currentSetPickedCount}
-      </span>
-    ) : (
-      <span className="absolute right-[calc(50%+91px)] top-1/2 -translate-y-1/2 whitespace-nowrap text-sm font-semibold tracking-wide text-gray-800">
-        Pick or
-      </span>
-    )}
-
-    <button
-      type="button"
-      onClick={handleNext}
-      disabled={transitionStage !== "idle"}
-      className={`group inline-flex h-11 min-w-[150px] items-center justify-center rounded-full px-8 text-base font-bold transition-all duration-300 disabled:cursor-default ${
-        hasPicks
-          ? "border border-fuchsia-600 bg-fuchsia-600 text-white shadow-[0_6px_16px_rgba(192,38,211,0.24)] hover:bg-fuchsia-700"
-          : "border border-gray-300 bg-white text-gray-800 shadow-sm hover:border-gray-400 hover:bg-gray-50"
-      }`}
-    >
-      {hasPicks ? "Next" : "Pass"}
-    </button>
-  </div>
-</div>
-)}
-<MyPicksPanel
-  addedCount={pickPanelAddedCount}
-  pulseKey={pickPanelPulseKey}
-  refreshKey={pickPanelRefreshKey}
-  works={candidateWorks}
-  onWorkClick={openPickedWork}
-  mobileOpen={mobilePicksOpen}
-  onMobileOpenChange={setMobilePicksOpen}
-/>
+      <SavedPanel
+        refreshKey={pickPanelRefreshKey}
+        addedCount={pickPanelAddedCount}
+        pulseKey={pickPanelPulseKey}
+        onWorkClick={openPickedWork}
+        onUnsave={handlePanelUnsave}
+        mobileOpen={mobilePicksOpen}
+        onMobileOpenChange={setMobilePicksOpen}
+      />
       {selectedWork && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-4"
-          onClick={requestCloseWorkModal}
-        >
-          <div
-            className="relative flex h-[calc(100dvh-24px)] max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-none flex-col overflow-hidden rounded-2xl bg-white md:h-auto md:max-h-[80vh] md:w-full md:max-w-4xl md:flex-row"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden bg-neutral-900">
-              {selectedWork.type === "youtube" && selectedWork.videoId ? (
-                <iframe
-                  src={`https://www.youtube.com/embed/${selectedWork.videoId}?autoplay=1&rel=0`}
-                  title={`${selectedWork.artistName} video`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  className="h-full max-h-full w-full max-w-full border-0 md:aspect-[9/16] md:max-h-[80vh] md:w-full"
-                />
-              ) : selectedWork.type === "tiktok" &&
-                selectedWork.videoId ? (
-                <TikTokPlayerEmbed
-                  videoId={selectedWork.videoId}
-                  title={`${selectedWork.artistName} TikTok`}
-                  className="!h-full !max-h-full !w-full !max-w-full md:!aspect-[9/16] md:!h-[min(80vh,720px)] md:!w-[min(calc(min(80vh,720px)*9/16),100%)]"
-                />
-              ) : (
-                <img
-                  src={selectedWork.image}
-                  alt={`${selectedWork.artistName} work`}
-                  draggable={false}
-                  className="max-h-full max-w-full object-contain md:max-h-[80vh] md:w-full"
-                />
-              )}
-            </div>
-            <aside className="relative w-full shrink-0 bg-white px-4 py-3.5 md:w-[300px] md:p-6">
-              <button
-                type="button"
-                onClick={requestCloseWorkModal}
-                aria-label="Close work"
-                className="absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-gray-100 text-lg text-gray-600 transition hover:bg-gray-200 hover:text-gray-950 md:right-4 md:top-4"
-              >
-                ×
-              </button>
-
-              <div className="pr-10">
-                <h2 className="truncate text-lg font-black tracking-tight text-gray-950 md:text-2xl">
-                  {selectedWork.artistName}
-                </h2>
-              </div>
-
-              {selectedWork.caption && (
-                <p className="mt-1.5 line-clamp-2 break-words text-sm leading-5 text-gray-600 md:mt-5 md:leading-6 md:line-clamp-[8]">
-                  {selectedWork.caption}
-                </p>
-              )}
-
-              <button
-                type="button"
-                onClick={() => togglePick(selectedWork)}
-                className={`mt-2.5 flex h-11 w-full items-center justify-center gap-2 rounded-full border text-sm font-bold transition md:mt-6 md:h-11 ${
-                  pickedWorkIds.has(selectedWork.id)
-                    ? "border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700"
-                    : "border-gray-200 bg-white text-gray-800 hover:border-fuchsia-200 hover:text-fuchsia-600"
-                }`}
-              >
-                <span aria-hidden="true">
-                  {pickedWorkIds.has(selectedWork.id) ? "✓" : "+"}
-                </span>
-                {pickedWorkIds.has(selectedWork.id) ? "Picked" : "Pick"}
-              </button>
-
-              <Link
-                href={`/creator/${selectedWork.artistId}`}
-                replace
-                onClick={(event) =>
-                  handleViewArtistProfile(
-                    event,
-                    selectedWork.artistId,
-                  )
-                }
-                className="mt-2 flex h-11 w-full cursor-pointer items-center justify-center rounded-full bg-gray-950 px-5 text-sm font-bold text-white transition hover:bg-gray-800 md:mt-3"
-              >
-                View Artist Profile
-              </Link>
-            </aside>
-          </div>
-        </div>
+        <WorkMediaModal
+          work={selectedWork}
+          isSaved={pickedWorkIds.has(selectedWork.id)}
+          onClose={requestCloseWorkModal}
+          onToggleSave={() => void togglePick(selectedWork)}
+          onOriginalClick={() =>
+            trackProductEvent({
+              event_name: "original_click",
+              work_id: selectedWork.id,
+              metadata: {
+                source: getAnalyticsSource(selectedWork),
+              },
+            })
+          }
+        />
       )}
 
       <AuthModal
         open={showLogin}
-        onClose={() =>
-          setShowLogin(false)
-        }
+        onClose={() => setShowLogin(false)}
         onSuccess={async () => {
           if (!pendingPickWork) {
             return;
           }
 
-          const workToPick =
-            pendingPickWork;
-
+          const workToPick = pendingPickWork;
           setPendingPickWork(null);
-
-          await togglePick(
-            workToPick,
-          );
+          await togglePick(workToPick);
         }}
       />
     </>

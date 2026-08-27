@@ -5,26 +5,56 @@ import {
 
 import { createClient } from "@/lib/supabase/server";
 
+import { parseDiscoverTypesParam } from "@/lib/discover/discoverTypes";
 import {
-  discoverTypesToTags,
-  parseDiscoverTypesParam,
-  type DiscoverType,
-} from "@/lib/discover/discoverTypes";
+  parseDiscoverCategoriesParam,
+} from "@/lib/discover/discoverCategorySelection";
+import {
+  parseDiscoverCategory,
+} from "@/lib/discover/discoverRowCategories";
+import type { CreatorCategory } from "@/lib/creator/creatorCategories";
 import { getDiscoverCandidateBatch } from "@/lib/discover/getRealDiscoverWorks";
 
-const ARTISTS_PER_BATCH = 10;
-const MUSIC_CATEGORY = "music";
+const WORKS_PER_BATCH = 36;
+
+function resolveDiscoverCategories(
+  request: NextRequest,
+): CreatorCategory[] | null {
+  const categoriesParam =
+    request.nextUrl.searchParams.get(
+      "categories",
+    );
+
+  if (categoriesParam !== null) {
+    return parseDiscoverCategoriesParam(
+      categoriesParam,
+    );
+  }
+
+  const category =
+    parseDiscoverCategory(
+      request.nextUrl.searchParams.get(
+        "category",
+      ),
+    );
+
+  if (!category || category === "all") {
+    return null;
+  }
+
+  return [category];
+}
 
 function deterministicStartOffset(
   seed: string,
-  artistPageCount: number,
+  workPageCount: number,
 ) {
   if (
     !seed ||
     !Number.isFinite(
-      artistPageCount,
+      workPageCount,
     ) ||
-    artistPageCount <= 1
+    workPageCount <= 1
   ) {
     return 0;
   }
@@ -46,38 +76,28 @@ function deterministicStartOffset(
 
   return (
     Math.abs(hash) %
-    artistPageCount
+    workPageCount
   );
 }
 
 function computeVirtualRound(
   clientRound: number,
   startOffset: number,
-  artistPageCount: number,
+  workPageCount: number,
 ) {
   const round = Math.max(
     1,
     Math.floor(clientRound),
   );
-  const artistPage =
-    (startOffset +
-      round -
-      1) %
-    artistPageCount;
-  const workPage = Math.floor(
-    (round - 1) /
-      artistPageCount,
-  );
 
   return (
-    workPage * artistPageCount +
-    artistPage
+    startOffset +
+    round -
+    1
   );
 }
 
-async function getArtistPageCount(
-  types: DiscoverType[],
-) {
+async function getWorkPageCount() {
   const supabase =
     await createClient();
 
@@ -85,20 +105,16 @@ async function getArtistPageCount(
     count,
     error,
   } = await supabase
-    .from("creators")
+    .from("works")
     .select("id", {
       count: "exact",
       head: true,
     })
-    .eq("category", MUSIC_CATEGORY)
-    .overlaps(
-      "tags",
-      discoverTypesToTags(types),
-    );
+    .eq("featured", false);
 
   if (error) {
     console.log(
-      "LOAD DISCOVER ARTIST COUNT ERROR:",
+      "LOAD DISCOVER WORK PAGE COUNT ERROR:",
       {
         code: error.code,
         message: error.message,
@@ -110,14 +126,12 @@ async function getArtistPageCount(
     return 1;
   }
 
-  const artistCount =
-    count ?? 0;
+  const workCount = count ?? 0;
 
   return Math.max(
     1,
     Math.ceil(
-      artistCount /
-        ARTISTS_PER_BATCH,
+      workCount / WORKS_PER_BATCH,
     ),
   );
 }
@@ -130,10 +144,12 @@ export async function GET(
       "types",
     );
 
-  const types =
-    parseDiscoverTypesParam(
-      typesParam,
-    );
+  parseDiscoverTypesParam(
+    typesParam,
+  );
+
+  const categories =
+    resolveDiscoverCategories(request);
 
   const roundValue =
     request.nextUrl.searchParams.get(
@@ -161,35 +177,26 @@ export async function GET(
     safeRound >= 1 &&
     seed
   ) {
-    const artistPageCount =
-      await getArtistPageCount(
-        types,
-      );
+    const workPageCount =
+      await getWorkPageCount();
     const startOffset =
       deterministicStartOffset(
         seed,
-        artistPageCount,
+        workPageCount,
       );
     const virtualRound =
       computeVirtualRound(
         safeRound,
         startOffset,
-        artistPageCount,
+        workPageCount,
       );
     const allowReuseRound0 =
       request.nextUrl.searchParams.get(
         "allowReuseRound0",
       ) === "true";
 
-    const artistPage =
-      (startOffset +
-        safeRound -
-        1) %
-      artistPageCount;
-    const workPage = Math.floor(
-      (safeRound - 1) /
-        artistPageCount,
-    );
+    const workPage =
+      virtualRound % workPageCount;
 
     if (
       allowReuseRound0 &&
@@ -199,30 +206,30 @@ export async function GET(
         works: [],
         reusedInitialBatch: true,
         nextRound: safeRound + 1,
-        artistPageCount,
-        artistPage,
+        artistPageCount: workPageCount,
+        artistPage: workPage,
         workPage,
       });
     }
 
     const batch =
       await getDiscoverCandidateBatch(
-        types,
+        categories,
         virtualRound,
       );
 
     return NextResponse.json({
       works: batch.works,
       nextRound: safeRound + 1,
-      artistPageCount,
-      artistPage,
+      artistPageCount: workPageCount,
+      artistPage: workPage,
       workPage,
     });
   }
 
   const batch =
     await getDiscoverCandidateBatch(
-      types,
+      categories,
       safeRound,
     );
 

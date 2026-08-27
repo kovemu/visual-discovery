@@ -21,6 +21,10 @@ import YouTubePreviewModal, {
 } from "@/components/admin/YouTubePreviewModal";
 import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
 import TikTokThumbnail from "@/components/works/TikTokThumbnail";
+import CreatorCategorySelect from "@/components/admin/CreatorCategorySelect";
+import {
+  DEFAULT_CREATOR_CATEGORY,
+} from "@/lib/creator/creatorCategories";
 
 const TAG_OPTIONS = [
   "K-pop",
@@ -175,7 +179,7 @@ const [
     useState("");
 
   const [category, setCategory] =
-    useState("music");
+    useState<string>(DEFAULT_CREATOR_CATEGORY);
 
   const [tagline, setTagline] =
     useState("");
@@ -337,7 +341,7 @@ const [
 
       setCategory(
         loadedArtist.category ??
-          "music",
+          DEFAULT_CREATOR_CATEGORY,
       );
 
       setTagline(
@@ -1066,31 +1070,11 @@ async function saveWorkEdit() {
                     Category
                   </label>
 
-                  <select
+                  <CreatorCategorySelect
                     value={category}
-                    onChange={(event) =>
-                      setCategory(
-                        event.target.value,
-                      )
-                    }
+                    onChange={setCategory}
                     className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm outline-none focus:border-zinc-400"
-                  >
-                    <option value="music">
-                      Music
-                    </option>
-
-                    <option value="dance">
-                      Dance
-                    </option>
-
-                    <option value="art">
-                      Art
-                    </option>
-
-                    <option value="cosplay">
-                      Cosplay
-                    </option>
-                  </select>
+                  />
                 </div>
               </div>
 

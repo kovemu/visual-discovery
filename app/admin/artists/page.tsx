@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import {
+  CREATOR_CATEGORY_OPTIONS,
+  formatCreatorCategoryLabel,
+} from "@/lib/creator/creatorCategories";
 
 type ArtistRow = {
   id: string;
@@ -26,50 +30,31 @@ const CATEGORY_OPTIONS = [
     value: "all",
     label: "All",
   },
-  {
-    value: "music",
-    label: "Music",
-  },
-  {
-    value: "dance",
-    label: "Dance",
-  },
-  {
-    value: "art",
-    label: "Art",
-  },
-  {
-    value: "cosplay",
-    label: "Cosplay",
-  },
+  ...CREATOR_CATEGORY_OPTIONS.map((option) => ({
+    value: option.value,
+    label: option.label,
+  })),
 ] as const;
 
 function formatCategory(category: string) {
-  if (!category) {
-    return "Unknown";
-  }
-
-  return (
-    category.charAt(0).toUpperCase() +
-    category.slice(1)
-  );
+  return formatCreatorCategoryLabel(category);
 }
 
 function getCategoryBadgeStyle(
   category: string,
 ) {
   switch (category.toLowerCase()) {
-    case "music":
+    case "kpop":
       return "bg-purple-50 text-purple-700 ring-purple-100";
 
-    case "dance":
+    case "cheer":
       return "bg-blue-50 text-blue-700 ring-blue-100";
 
-    case "art":
-      return "bg-orange-50 text-orange-700 ring-orange-100";
-
-    case "cosplay":
+    case "cos":
       return "bg-pink-50 text-pink-700 ring-pink-100";
+
+    case "look":
+      return "bg-orange-50 text-orange-700 ring-orange-100";
 
     default:
       return "bg-zinc-100 text-zinc-600 ring-zinc-200";
@@ -93,17 +78,17 @@ function getCategoryFilterStyle(
   }
 
   switch (category) {
-    case "music":
+    case "kpop":
       return "border-purple-200 bg-purple-50 text-purple-700";
 
-    case "dance":
+    case "cheer":
       return "border-blue-200 bg-blue-50 text-blue-700";
 
-    case "art":
-      return "border-orange-200 bg-orange-50 text-orange-700";
-
-    case "cosplay":
+    case "cos":
       return "border-pink-200 bg-pink-50 text-pink-700";
+
+    case "look":
+      return "border-orange-200 bg-orange-50 text-orange-700";
 
     default:
       return "border-zinc-950 bg-zinc-950 text-white";

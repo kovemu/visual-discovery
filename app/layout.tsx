@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-
+import Providers from "@/components/Providers";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -13,28 +13,26 @@ const geistMono = Geist_Mono({
 });
 
 const SITE_TITLE =
-  "Kovemu | Discover Your Next K-pop Artist";
+  "Visual | Clip Discovery";
 
 const SITE_DESCRIPTION =
-  "Discover rising and under-the-radar K-pop artists through performances, fancams, and visual highlights.";
+  "Discover visual clips through a simple browse, save, and next flow.";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://kovemu.com"),
+  metadataBase: new URL("https://visual-discovery.local"),
   title: SITE_TITLE,
   description: SITE_DESCRIPTION,
   openGraph: {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    url: "https://kovemu.com",
-    siteName: "Kovemu",
+    url: "https://visual-discovery.local",
+    siteName: "Visual",
     type: "website",
-    images: ["/og/kovemu-og.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    images: ["/og/kovemu-og.png"],
   },
 };
 
@@ -48,7 +46,8 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
-    </html>
+      <body className="flex min-h-full flex-col">
+        <Providers>{children}</Providers>
+      </body>    </html>
   );
 }

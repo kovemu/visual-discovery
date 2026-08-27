@@ -2,6 +2,10 @@ import { getAnalyticsSessionId } from "@/lib/analytics/getAnalyticsSessionId";
 
 export const PRODUCT_EVENT_NAMES = [
   "discover_set_view",
+  "card_open",
+  "save",
+  "next",
+  "original_click",
   "pick",
   "pass_next",
   "profile_open",

@@ -6,6 +6,7 @@ import {
 import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+import { ALLOWED_CREATOR_CATEGORIES } from "@/lib/creator/creatorCategories";
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -223,12 +224,8 @@ export async function POST(
     /*
       Category validation
     */
-    const allowedCategories = [
-      "music",
-      "dance",
-      "art",
-      "cosplay",
-    ];
+    const allowedCategories =
+      ALLOWED_CREATOR_CATEGORIES;
 
     if (
       !allowedCategories.includes(

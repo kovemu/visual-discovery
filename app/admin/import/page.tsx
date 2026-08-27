@@ -25,6 +25,10 @@ import {
   extractTikTokVideoId,
 } from "@/lib/tiktok/extractTikTokVideoId";
 import { extractInstagramUrl } from "@/lib/youtube/extractInstagramUrl";
+import CreatorCategorySelect from "@/components/admin/CreatorCategorySelect";
+import {
+  DEFAULT_CREATOR_CATEGORY,
+} from "@/lib/creator/creatorCategories";
 
 type YouTubeVideo = {
   id: string;
@@ -303,7 +307,7 @@ function buildArtistProfileDraft(
       usernameFromCustomUrl(
         channel.customUrl,
       ),
-    category: "music",
+    category: DEFAULT_CREATOR_CATEGORY,
     tags: ["K-pop"],
     youtubeUrl: url.trim(),
     instagramUrl:
@@ -686,7 +690,7 @@ const [
       name: "",
       username: "",
       category:
-        "music",
+        DEFAULT_CREATOR_CATEGORY,
     });
 
   /*
@@ -948,7 +952,7 @@ setNewArtist({
       channelUrl,
     ),
 
-  category: "music",
+  category: DEFAULT_CREATOR_CATEGORY,
 });
 
 if (data.channel) {
@@ -2250,7 +2254,7 @@ function removeExternalImageDraft(
         artistProfileDraft.username.trim(),
       category:
         artistProfileDraft.category ||
-        "music",
+        DEFAULT_CREATOR_CATEGORY,
       tagline:
         artistProfileDraft.tagline.trim(),
       bio: artistProfileDraft.bio.trim(),
@@ -2707,7 +2711,7 @@ function removeExternalImageDraft(
         name: "",
         username: "",
         category:
-          "music",
+          DEFAULT_CREATOR_CATEGORY,
       });
 
       setShowCreateArtist(
@@ -3303,34 +3307,19 @@ if (
                 <span className="mb-2 block text-sm font-medium text-zinc-700">
                   Category
                 </span>
-                <select
+                <CreatorCategorySelect
                   value={
                     artistProfileDraft.category
                   }
-                  onChange={(event) =>
+                  onChange={(category) =>
                     updateArtistProfileDraft(
                       {
-                        category:
-                          event.target
-                            .value,
+                        category,
                       },
                     )
                   }
                   className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm"
-                >
-                  <option value="music">
-                    Music
-                  </option>
-                  <option value="dance">
-                    Dance
-                  </option>
-                  <option value="art">
-                    Art
-                  </option>
-                  <option value="cosplay">
-                    Cosplay
-                  </option>
-                </select>
+                />
               </label>
 
               <label className="block">
@@ -4888,38 +4877,22 @@ if (
                   className="h-11 rounded-xl border px-3"
                 />
 
-                <select
+                <CreatorCategorySelect
                   value={
                     newArtist.category
                   }
-                  onChange={(event) =>
+                  onChange={(category) =>
                     setNewArtist(
                       (
                         current,
                       ) => ({
                         ...current,
-                        category:
-                          event
-                            .target
-                            .value,
+                        category,
                       }),
                     )
                   }
                   className="h-11 rounded-xl border px-3"
-                >
-                  <option value="music">
-                    Music
-                  </option>
-                  <option value="dance">
-                    Dance
-                  </option>
-                  <option value="art">
-                    Art
-                  </option>
-                  <option value="cosplay">
-                    Cosplay
-                  </option>
-                </select>
+                />
               </div>
 
               <button

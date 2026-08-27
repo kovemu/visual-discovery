@@ -59,6 +59,56 @@ function sanitizeMetadata(
     return {};
   }
 
+  if (eventName === "save") {
+    if (
+      raw.action === "save" ||
+      raw.action === "unsave"
+    ) {
+      return { action: raw.action };
+    }
+
+    return {};
+  }
+
+  if (
+    eventName === "card_open" ||
+    eventName === "original_click"
+  ) {
+    const sanitized: Record<
+      string,
+      string
+    > = {};
+
+    if (
+      raw.source === "youtube" ||
+      raw.source === "tiktok" ||
+      raw.source === "image"
+    ) {
+      sanitized.source = raw.source;
+    }
+
+    return sanitized;
+  }
+
+  if (eventName === "next") {
+    if (
+      typeof raw.current_set_size ===
+        "number" &&
+      Number.isInteger(
+        raw.current_set_size,
+      ) &&
+      raw.current_set_size >= 1 &&
+      raw.current_set_size <= 24
+    ) {
+      return {
+        current_set_size:
+          raw.current_set_size,
+      };
+    }
+
+    return {};
+  }
+
   if (eventName === "discover_set_view") {
     const sanitized: Record<
       string,
