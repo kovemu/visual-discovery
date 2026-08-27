@@ -8,6 +8,11 @@ import {
   type CreatorCategory,
 } from "@/lib/creator/creatorCategories";
 
+type SubmissionStatus =
+  | "pending"
+  | "approved"
+  | "rejected";
+
 type SubmissionRow = {
   id: string;
   user_id: string | null;
@@ -19,7 +24,18 @@ type SubmissionRow = {
   submitter?: string | null;
   status: string;
   created_at: string;
+  work_id?: number | string | null;
+  discover_category?: string | null;
 };
+
+const STATUS_TABS: {
+  value: SubmissionStatus;
+  label: string;
+}[] = [
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+];
 
 function formatSourceLabel(sourceType: string) {
   if (sourceType === "youtube") {
@@ -37,7 +53,47 @@ function formatSubmittedAt(value: string) {
   return new Date(value).toLocaleString();
 }
 
+function formatCategoryLabel(
+  value: string | null | undefined,
+) {
+  if (!value) {
+    return null;
+  }
+
+  const option = CREATOR_CATEGORY_OPTIONS.find(
+    (item) => item.value === value,
+  );
+
+  return option?.label ?? value.toUpperCase();
+}
+
+function emptyStateMessage(status: SubmissionStatus) {
+  if (status === "pending") {
+    return "No pending submissions.";
+  }
+
+  if (status === "approved") {
+    return "No approved submissions.";
+  }
+
+  return "No rejected submissions.";
+}
+
+function loadErrorMessage(status: SubmissionStatus) {
+  if (status === "pending") {
+    return "Failed to load pending submissions.";
+  }
+
+  if (status === "approved") {
+    return "Failed to load approved submissions.";
+  }
+
+  return "Failed to load rejected submissions.";
+}
+
 export default function SubmissionsModeration() {
+  const [activeStatus, setActiveStatus] =
+    useState<SubmissionStatus>("pending");
   const [submissions, setSubmissions] = useState<
     SubmissionRow[]
   >([]);
@@ -52,47 +108,58 @@ export default function SubmissionsModeration() {
     Record<string, string>
   >({});
 
-  const loadSubmissions = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const loadSubmissions = useCallback(
+    async (status: SubmissionStatus) => {
+      setLoading(true);
+      setError("");
 
-    try {
-      const response = await fetch(
-        "/api/admin/submissions",
-      );
+      try {
+        const response = await fetch(
+          `/api/admin/submissions?status=${status}`,
+        );
 
-      if (!response.ok) {
-        throw new Error(await response.text());
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+
+        const data = (await response.json()) as {
+          submissions?: SubmissionRow[];
+        };
+
+        setSubmissions(data.submissions ?? []);
+      } catch (loadError) {
+        console.error("LOAD SUBMISSIONS ERROR:", loadError);
+        setError(loadErrorMessage(status));
+      } finally {
+        setLoading(false);
       }
-
-      const data = (await response.json()) as {
-        submissions?: SubmissionRow[];
-      };
-
-      setSubmissions(data.submissions ?? []);
-    } catch (loadError) {
-      console.error("LOAD SUBMISSIONS ERROR:", loadError);
-      setError("Failed to load pending submissions.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    void loadSubmissions();
-  }, [loadSubmissions]);
+    void loadSubmissions(activeStatus);
+  }, [activeStatus, loadSubmissions]);
 
-  async function updateStatus(
+  async function runSubmissionAction(
     id: string,
-    status: "approved" | "rejected",
+    action: "approve" | "reject" | "remove",
+    discoverCategory?: CreatorCategory,
   ) {
-    const discoverCategory = selectedCategories[id];
-
-    if (status === "approved" && !discoverCategory) {
+    if (action === "approve" && !discoverCategory) {
       setRowErrors((current) => ({
         ...current,
         [id]: "Select a category before approving.",
       }));
+      return;
+    }
+
+    if (
+      action === "remove" &&
+      !window.confirm(
+        "Remove this clip from Discover? It will remain in the user's My Picks.",
+      )
+    ) {
       return;
     }
 
@@ -113,8 +180,8 @@ export default function SubmissionsModeration() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            status,
-            ...(status === "approved"
+            action,
+            ...(action === "approve"
               ? {
                   discover_category: discoverCategory,
                 }
@@ -172,6 +239,27 @@ export default function SubmissionsModeration() {
         </Link>
       </div>
 
+      <div className="mt-6 flex flex-wrap gap-2">
+        {STATUS_TABS.map((tab) => {
+          const isActive = activeStatus === tab.value;
+
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => setActiveStatus(tab.value)}
+              className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                isActive
+                  ? "border-gray-950 bg-gray-950 text-white"
+                  : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
       {error && (
         <p className="mt-4 text-sm text-red-600">{error}</p>
       )}
@@ -182,7 +270,7 @@ export default function SubmissionsModeration() {
         </p>
       ) : submissions.length === 0 ? (
         <p className="mt-8 text-sm text-gray-500">
-          No pending submissions.
+          {emptyStateMessage(activeStatus)}
         </p>
       ) : (
         <div className="mt-8 space-y-4">
@@ -191,6 +279,9 @@ export default function SubmissionsModeration() {
               selectedCategories[submission.id];
             const rowError = rowErrors[submission.id];
             const busy = updatingId === submission.id;
+            const categoryLabel = formatCategoryLabel(
+              submission.discover_category,
+            );
 
             return (
               <article
@@ -237,60 +328,109 @@ export default function SubmissionsModeration() {
                         submission.created_at,
                       )}
                     </p>
+                    {activeStatus !== "pending" &&
+                    categoryLabel ? (
+                      <p className="mt-2 text-sm text-gray-600">
+                        Category:{" "}
+                        <span className="font-semibold text-gray-950">
+                          {categoryLabel}
+                        </span>
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">
-                      Category
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {CREATOR_CATEGORY_OPTIONS.map(
-                        (option) => {
-                          const isActive =
-                            selected === option.value;
+                {activeStatus === "pending" ? (
+                  <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">
+                        Category
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {CREATOR_CATEGORY_OPTIONS.map(
+                          (option) => {
+                            const isActive =
+                              selected === option.value;
 
-                          return (
-                            <button
-                              key={option.value}
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                setSelectedCategories(
-                                  (current) => ({
-                                    ...current,
-                                    [submission.id]:
-                                      option.value,
-                                  }),
-                                );
-                                setRowErrors(
-                                  (current) => {
-                                    const next = {
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                  setSelectedCategories(
+                                    (current) => ({
                                       ...current,
-                                    };
-                                    delete next[
-                                      submission.id
-                                    ];
-                                    return next;
-                                  },
-                                );
-                              }}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
-                                isActive
-                                  ? "border-gray-950 bg-gray-950 text-white"
-                                  : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          );
-                        },
-                      )}
+                                      [submission.id]:
+                                        option.value,
+                                    }),
+                                  );
+                                  setRowErrors(
+                                    (current) => {
+                                      const next = {
+                                        ...current,
+                                      };
+                                      delete next[
+                                        submission.id
+                                      ];
+                                      return next;
+                                    },
+                                  );
+                                }}
+                                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                                  isActive
+                                    ? "border-gray-950 bg-gray-950 text-white"
+                                    : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            );
+                          },
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={submission.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-gray-400"
+                      >
+                        Open Original
+                      </a>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void runSubmissionAction(
+                            submission.id,
+                            "approve",
+                            selected,
+                          )
+                        }
+                        className="rounded-full bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-gray-800 disabled:opacity-50"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void runSubmissionAction(
+                            submission.id,
+                            "reject",
+                          )
+                        }
+                        className="rounded-full border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-gray-400 disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
+                ) : (
+                  <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4">
                     <a
                       href={submission.source_url}
                       target="_blank"
@@ -299,34 +439,23 @@ export default function SubmissionsModeration() {
                     >
                       Open Original
                     </a>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void updateStatus(
-                          submission.id,
-                          "approved",
-                        )
-                      }
-                      className="rounded-full bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-gray-800 disabled:opacity-50"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void updateStatus(
-                          submission.id,
-                          "rejected",
-                        )
-                      }
-                      className="rounded-full border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-gray-400 disabled:opacity-50"
-                    >
-                      Reject
-                    </button>
+                    {activeStatus === "approved" ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void runSubmissionAction(
+                            submission.id,
+                            "remove",
+                          )
+                        }
+                        className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:border-red-400 disabled:opacity-50"
+                      >
+                        Remove from Discover
+                      </button>
+                    ) : null}
                   </div>
-                </div>
+                )}
 
                 {rowError ? (
                   <p className="mt-3 text-sm text-red-600">

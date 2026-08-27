@@ -27,6 +27,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 
 import WorkMediaModal from "@/components/works/WorkMediaModal";
 import ImportClipForm from "@/components/saved/ImportClipForm";
@@ -40,6 +41,8 @@ import {
 } from "@/lib/works/workDisplay";
 
 const DRAG_ACTIVATION_DISTANCE_PX = 8;
+const TOUCH_ACTIVATION_DELAY_MS = 200;
+const TOUCH_ACTIVATION_TOLERANCE_PX = 8;
 const SAVED_GRID_CLASS =
   "grid grid-cols-3 gap-1.5 sm:grid-cols-[repeat(auto-fill,150px)] sm:gap-2";
 const SAVED_CARD_MEDIA_CLASS =
@@ -219,22 +222,41 @@ function SortableSavedCard({
   });
 
   return (
-    <button
+    <div
       ref={setNodeRef}
-      type="button"
-      onClick={() => onOpen(work)}
-      className={SAVED_CARD_BUTTON_CLASS}
+      className={`${SAVED_CARD_BUTTON_CLASS} relative`}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.35 : 1,
         zIndex: isDragging ? 1 : undefined,
       }}
-      {...attributes}
-      {...listeners}
     >
-      <SavedCardFace work={work} />
-    </button>
+      <button
+        type="button"
+        onClick={() => onOpen(work)}
+        className="w-full text-left"
+      >
+        <SavedCardFace work={work} />
+      </button>
+      <button
+        type="button"
+        aria-label="Reorder"
+        className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 touch-none items-center justify-center rounded-md bg-black/55 text-white/90 backdrop-blur-sm"
+        {...attributes}
+        {...listeners}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          listeners?.onPointerDown?.(event);
+        }}
+      >
+        <GripVertical size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -273,8 +295,8 @@ export default function SavedGrid() {
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 250,
-        tolerance: 5,
+        delay: TOUCH_ACTIVATION_DELAY_MS,
+        tolerance: TOUCH_ACTIVATION_TOLERANCE_PX,
       },
     }),
     useSensor(KeyboardSensor, {

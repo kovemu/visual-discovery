@@ -75,8 +75,15 @@ const CARDS_PER_ROW = 6;
 const CARD_WIDTH_PX = 108;
 const STACK_GAP_COLLAPSED_PX = 21;
 const STACK_GAP_EXPANDED_PX = 36;
+const CARD_LIFT_PX = 8;
 const HOVERED_CARD_Z_INDEX = 50;
-const STACK_TRANSITION_MS = 220;
+const CARD_SCRUB_THRESHOLD_PX = 8;
+
+function getEffectiveGap(isExpanded: boolean) {
+  return isExpanded
+    ? STACK_GAP_EXPANDED_PX
+    : STACK_GAP_COLLAPSED_PX;
+}
 
 function getCardRightOffset(
   index: number,
@@ -86,44 +93,54 @@ function getCardRightOffset(
   return (count - 1 - index) * gap;
 }
 
+function resolveActiveCardIndexFromRight(
+  distanceFromRight: number,
+  count: number,
+  gap: number,
+): number | null {
+  if (count <= 0) {
+    return null;
+  }
+
+  const stripAreaWidth = (count - 1) * gap;
+
+  if (
+    distanceFromRight < 0 ||
+    distanceFromRight > stripAreaWidth + CARD_WIDTH_PX
+  ) {
+    return null;
+  }
+
+  if (distanceFromRight < stripAreaWidth) {
+    const stripIndex = Math.floor(
+      distanceFromRight / gap,
+    );
+
+    return count - 1 - stripIndex;
+  }
+
+  return 0;
+}
+
 function resolveHoveredCardIdFromPointer(
   clientX: number,
   containerRect: DOMRect,
   works: SavedPanelWork[],
   gap: number,
 ) {
-  const xFromRight =
+  const distanceFromRight =
     containerRect.right - clientX;
+  const cardIndex = resolveActiveCardIndexFromRight(
+    distanceFromRight,
+    works.length,
+    gap,
+  );
 
-  for (
-    let index = works.length - 1;
-    index >= 0;
-    index -= 1
-  ) {
-    const right = getCardRightOffset(
-      index,
-      works.length,
-      gap,
-    );
-    const stripStart =
-      index === 0
-        ? right
-        : getCardRightOffset(
-            index - 1,
-            works.length,
-            gap,
-          );
-    const stripEnd = right + CARD_WIDTH_PX;
-
-    if (
-      xFromRight > stripStart &&
-      xFromRight <= stripEnd
-    ) {
-      return works[index]?.id ?? null;
-    }
+  if (cardIndex === null) {
+    return null;
   }
 
-  return null;
+  return works[cardIndex]?.id ?? null;
 }
 
 function isToday(dateString: string) {
@@ -209,42 +226,6 @@ function isCoarsePointer(
   );
 }
 
-function hitTestPickCardId(
-  clientX: number,
-  clientY: number,
-  stackId: string,
-) {
-  const nodes =
-    document.elementsFromPoint(
-      clientX,
-      clientY,
-    );
-
-  for (const node of nodes) {
-    if (!(node instanceof Element)) {
-      continue;
-    }
-
-    const card = node.closest(
-      "[data-pick-card-id]",
-    );
-
-    if (!(card instanceof HTMLElement)) {
-      continue;
-    }
-
-    if (
-      card.dataset.pickStack !== stackId
-    ) {
-      continue;
-    }
-
-    return card.dataset.pickCardId ?? null;
-  }
-
-  return null;
-}
-
 type SavedCardStackRowProps = {
   works: SavedPanelWork[];
   stackId: string;
@@ -262,22 +243,14 @@ function SavedCardStackRow({
   onWorkClick,
   onUnsave,
 }: SavedCardStackRowProps) {
-  const [
-    hoveredStack,
-    setHoveredStack,
-  ] = useState(false);
-  const [
-    scrubWorkId,
-    setScrubWorkId,
-  ] = useState<string | null>(null);
-  const [
-    scrubbingStack,
-    setScrubbingStack,
-  ] = useState(false);
-  const [
-    hoveredCardId,
-    setHoveredCardId,
-  ] = useState<string | null>(null);
+  const [hoveredStack, setHoveredStack] =
+    useState(false);
+  const [touchingStack, setTouchingStack] =
+    useState(false);
+  const [scrubbingStack, setScrubbingStack] =
+    useState(false);
+  const [activeWorkId, setActiveWorkId] =
+    useState<string | null>(null);
 
   const cardScrubRef = useRef<{
     pointerId: number;
@@ -290,38 +263,50 @@ function SavedCardStackRow({
   const rowRef = useRef<HTMLDivElement>(null);
 
   const expanded =
-    hoveredStack || scrubbingStack;
-  const gap = expanded
-    ? STACK_GAP_EXPANDED_PX
-    : STACK_GAP_COLLAPSED_PX;
+    hoveredStack ||
+    touchingStack ||
+    scrubbingStack;
+  const effectiveGap = getEffectiveGap(expanded);
   const maxStackWidth =
     CARD_WIDTH_PX +
     Math.max(0, works.length - 1) *
       STACK_GAP_EXPANDED_PX;
 
-  function updateHoveredCardFromPointer(
+  function resolveCardIdFromPointer(
     clientX: number,
+    gapPx: number,
   ) {
     const row = rowRef.current;
 
     if (!row) {
-      return;
+      return null;
     }
 
-    setHoveredCardId(
-      resolveHoveredCardIdFromPointer(
-        clientX,
-        row.getBoundingClientRect(),
-        works,
-        gap,
-      ),
+    return resolveHoveredCardIdFromPointer(
+      clientX,
+      row.getBoundingClientRect(),
+      works,
+      gapPx,
     );
   }
 
-  function resetCardScrub() {
+  const updateActiveCardFromPointer = useCallback(
+    (clientX: number, gapPx: number) => {
+      const nextId = resolveCardIdFromPointer(
+        clientX,
+        gapPx,
+      );
+
+      setActiveWorkId(nextId);
+      return nextId;
+    },
+    [works],
+  );
+
+  function resetTouchInteraction() {
     cardScrubRef.current = null;
+    setTouchingStack(false);
     setScrubbingStack(false);
-    setScrubWorkId(null);
   }
 
   function onStackPointerDown(
@@ -332,6 +317,11 @@ function SavedCardStackRow({
     }
 
     suppressCardClickRef.current = true;
+    setTouchingStack(true);
+    updateActiveCardFromPointer(
+      event.clientX,
+      getEffectiveGap(true),
+    );
     cardScrubRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -347,55 +337,82 @@ function SavedCardStackRow({
     const state = cardScrubRef.current;
 
     if (
-      !state ||
-      state.pointerId !== event.pointerId ||
-      state.mode === "scroll"
+      isCoarsePointer(event) &&
+      state &&
+      state.pointerId === event.pointerId &&
+      state.mode !== "scroll"
     ) {
-      return;
-    }
-
-    const dx = event.clientX - state.startX;
-    const dy = event.clientY - state.startY;
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-
-    if (state.mode === "undecided") {
-      if (Math.max(absDx, absDy) < 8) {
-        return;
-      }
-
-      if (absDy > absDx * 1.15) {
-        state.mode = "scroll";
-        resetCardScrub();
-        return;
-      }
-
-      if (absDx > absDy * 1.15) {
-        state.mode = "scrub";
-        setScrubbingStack(true);
-        setScrubWorkId(
-          hitTestPickCardId(
-            event.clientX,
-            event.clientY,
-            stackId,
-          ),
-        );
-        state.captured = true;
-        event.currentTarget.setPointerCapture(
-          event.pointerId,
-        );
-      }
-
-      return;
-    }
-
-    setScrubWorkId(
-      hitTestPickCardId(
+      updateActiveCardFromPointer(
         event.clientX,
-        event.clientY,
-        stackId,
-      ),
+        getEffectiveGap(true),
+      );
+
+      const dx = event.clientX - state.startX;
+      const dy = event.clientY - state.startY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      if (state.mode === "undecided") {
+        if (
+          Math.max(absDx, absDy) <
+          CARD_SCRUB_THRESHOLD_PX
+        ) {
+          return;
+        }
+
+        if (absDy > absDx * 1.15) {
+          state.mode = "scroll";
+          resetTouchInteraction();
+          setActiveWorkId(null);
+          return;
+        }
+
+        if (absDx > absDy * 1.15) {
+          state.mode = "scrub";
+          setScrubbingStack(true);
+          state.captured = true;
+          event.currentTarget.setPointerCapture(
+            event.pointerId,
+          );
+        }
+
+        return;
+      }
+
+      return;
+    }
+
+    if (
+      !isCoarsePointer(event) &&
+      hoveredStack
+    ) {
+      updateActiveCardFromPointer(
+        event.clientX,
+        effectiveGap,
+      );
+    }
+  }
+
+  function openWorkFromPointer(
+    clientX: number,
+    gapPx: number,
+  ) {
+    const cardId = resolveCardIdFromPointer(
+      clientX,
+      gapPx,
     );
+
+    if (!cardId) {
+      return;
+    }
+
+    const work = works.find(
+      (item) => item.id === cardId,
+    );
+
+    if (work) {
+      onWorkClick(work);
+    }
   }
 
   function onStackPointerUp(
@@ -422,36 +439,27 @@ function SavedCardStackRow({
 
     const mode = state.mode;
     cardScrubRef.current = null;
+    setTouchingStack(false);
+    setScrubbingStack(false);
 
     if (mode === "scroll") {
-      resetCardScrub();
+      setActiveWorkId(null);
       return;
     }
 
-    const cardId = hitTestPickCardId(
+    openWorkFromPointer(
       event.clientX,
-      event.clientY,
-      stackId,
+      getEffectiveGap(true),
     );
-
-    setScrubbingStack(false);
-    setScrubWorkId(null);
-
-    if (!cardId) {
-      return;
-    }
-
-    const work = works.find(
-      (item) => item.id === cardId,
-    );
-
-    if (work) {
-      onWorkClick(work);
-    }
+    setActiveWorkId(null);
+    window.setTimeout(() => {
+      suppressCardClickRef.current = false;
+    }, 0);
   }
 
   function onStackPointerCancel() {
-    resetCardScrub();
+    resetTouchInteraction();
+    setActiveWorkId(null);
   }
 
   return (
@@ -464,26 +472,16 @@ function SavedCardStackRow({
       }
       onMouseLeave={() => {
         setHoveredStack(false);
-        setHoveredCardId(null);
+        setActiveWorkId(null);
       }}
       onMouseMove={(event) => {
-        updateHoveredCardFromPointer(
+        updateActiveCardFromPointer(
           event.clientX,
+          effectiveGap,
         );
       }}
       onPointerDown={onStackPointerDown}
-      onPointerMove={(event) => {
-        onStackPointerMove(event);
-
-        if (
-          !isCoarsePointer(event) &&
-          !scrubbingStack
-        ) {
-          updateHoveredCardFromPointer(
-            event.clientX,
-          );
-        }
-      }}
+      onPointerMove={onStackPointerMove}
       onPointerUp={onStackPointerUp}
       onPointerCancel={
         onStackPointerCancel
@@ -503,34 +501,30 @@ function SavedCardStackRow({
         const right = getCardRightOffset(
           index,
           works.length,
-          gap,
+          effectiveGap,
         );
 
-        const isScrubActive =
-          scrubWorkId === work.id;
-        const isHovered =
-          hoveredCardId === work.id;
         const isRaised =
-          isScrubActive || isHovered;
+          activeWorkId === work.id;
 
         return (
           <div
             key={work.id}
             data-pick-card-id={work.id}
             data-pick-stack={stackId}
-            className={`group/card absolute top-0 h-[156px] w-[108px] overflow-visible rounded-xl border-2 bg-[#141414] shadow-[0_8px_24px_rgba(0,0,0,0.45)] ease-out ${
+            className={`group/card absolute top-0 h-[156px] w-[108px] overflow-visible rounded-xl border-0 bg-[#141414] shadow-[0_8px_24px_rgba(0,0,0,0.45)] outline-none transition-all duration-300 ease-out focus:outline-none focus-visible:outline-none ${
               isRaised
-                ? "pointer-events-auto border-zinc-300/90 shadow-[0_14px_32px_rgba(0,0,0,0.62)]"
-                : "pointer-events-none border-[#262626]"
+                ? "pointer-events-auto"
+                : "pointer-events-none"
             }`}
             style={{
               right: `${right}px`,
               zIndex: isRaised
                 ? HOVERED_CARD_Z_INDEX
-                : works.length -
-                  index +
-                  2,
-              transition: `right ${STACK_TRANSITION_MS}ms ease-out, box-shadow ${STACK_TRANSITION_MS}ms ease-out, border-color ${STACK_TRANSITION_MS}ms ease-out`,
+                : works.length - index,
+              transform: isRaised
+                ? `translateY(-${CARD_LIFT_PX}px)`
+                : "translateY(0)",
             }}
           >
             <button
@@ -541,14 +535,12 @@ function SavedCardStackRow({
                 ) {
                   event.preventDefault();
                   event.stopPropagation();
-                  suppressCardClickRef.current =
-                    false;
                   return;
                 }
 
                 onWorkClick(work);
               }}
-              className="absolute inset-0 overflow-hidden rounded-[10px] text-left"
+              className="absolute inset-0 overflow-hidden rounded-[10px] border-0 text-left outline-none focus:outline-none focus-visible:outline-none"
               aria-label={
                 work.artistName
                   ? `Open ${work.artistName} clip`
@@ -579,7 +571,7 @@ function SavedCardStackRow({
                 onUnsave(work);
               }}
               className={`absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white/90 backdrop-blur-sm transition hover:bg-black/75 ${
-                isScrubActive
+                isRaised
                   ? "opacity-100"
                   : "opacity-0 group-hover/card:opacity-100"
               }`}

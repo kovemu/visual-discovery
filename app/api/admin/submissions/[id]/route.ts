@@ -26,6 +26,36 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
+type SubmissionAction =
+  | "approve"
+  | "reject"
+  | "remove";
+
+function parseSubmissionAction(
+  body: {
+    action?: unknown;
+    status?: unknown;
+  },
+): SubmissionAction | null {
+  if (
+    body.action === "approve" ||
+    body.action === "reject" ||
+    body.action === "remove"
+  ) {
+    return body.action;
+  }
+
+  if (body.status === "approved") {
+    return "approve";
+  }
+
+  if (body.status === "rejected") {
+    return "reject";
+  }
+
+  return null;
+}
+
 export async function PATCH(
   request: NextRequest,
   context: RouteContext,
@@ -78,16 +108,16 @@ export async function PATCH(
     }
 
     const payload = body as {
+      action?: unknown;
       status?: unknown;
       discover_category?: unknown;
     };
 
-    if (
-      payload.status !== "approved" &&
-      payload.status !== "rejected"
-    ) {
+    const action = parseSubmissionAction(payload);
+
+    if (!action) {
       return NextResponse.json(
-        { error: "Invalid status." },
+        { error: "Invalid action." },
         { status: 400 },
       );
     }
@@ -101,7 +131,7 @@ export async function PATCH(
         : "";
 
     if (
-      payload.status === "approved" &&
+      action === "approve" &&
       !isCreatorCategory(discoverCategory)
     ) {
       return NextResponse.json(
@@ -124,6 +154,109 @@ export async function PATCH(
           },
         },
       );
+
+    if (action === "remove") {
+      const { data: approved, error: loadError } =
+        await supabaseAdmin
+          .from("clip_submissions")
+          .select("id, work_id")
+          .eq("id", id)
+          .eq("status", "approved")
+          .maybeSingle();
+
+      if (loadError) {
+        console.error(
+          "ADMIN SUBMISSION REMOVE LOAD ERROR:",
+          loadError,
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "Failed to remove submission from Discover.",
+          },
+          { status: 500 },
+        );
+      }
+
+      if (!approved) {
+        return NextResponse.json(
+          {
+            error:
+              "Approved submission not found.",
+          },
+          { status: 404 },
+        );
+      }
+
+      if (approved.work_id) {
+        const { error: eligibleError } =
+          await supabaseAdmin
+            .from("works")
+            .update({
+              discover_eligible: false,
+            })
+            .eq("id", approved.work_id);
+
+        if (eligibleError) {
+          console.error(
+            "ADMIN SUBMISSION REMOVE WORK ERROR:",
+            eligibleError,
+          );
+
+          return NextResponse.json(
+            {
+              error:
+                "Failed to remove submission from Discover.",
+            },
+            { status: 500 },
+          );
+        }
+      }
+
+      const { data, error } =
+        await supabaseAdmin
+          .from("clip_submissions")
+          .update({
+            status: "rejected",
+            reviewed_at:
+              new Date().toISOString(),
+            reviewed_by: auth.user.id,
+          })
+          .eq("id", id)
+          .eq("status", "approved")
+          .select("id, status")
+          .maybeSingle();
+
+      if (error) {
+        console.error(
+          "ADMIN SUBMISSION REMOVE PATCH ERROR:",
+          error,
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "Failed to remove submission from Discover.",
+          },
+          { status: 500 },
+        );
+      }
+
+      if (!data) {
+        return NextResponse.json(
+          {
+            error:
+              "Approved submission not found.",
+          },
+          { status: 404 },
+        );
+      }
+
+      return NextResponse.json({
+        submission: data,
+      });
+    }
 
     const { data: pending, error: loadError } =
       await supabaseAdmin
@@ -165,7 +298,7 @@ export async function PATCH(
       | string
       | null;
 
-    if (payload.status === "approved") {
+    if (action === "approve") {
       if (workId) {
         const { error: eligibleError } =
           await supabaseAdmin
@@ -284,11 +417,41 @@ export async function PATCH(
       }
     }
 
+    if (action === "reject" && workId) {
+      const { error: eligibleError } =
+        await supabaseAdmin
+          .from("works")
+          .update({
+            discover_eligible: false,
+          })
+          .eq("id", workId);
+
+      if (eligibleError) {
+        console.error(
+          "ADMIN SUBMISSION REJECT WORK ERROR:",
+          eligibleError,
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "Failed to reject submission.",
+          },
+          { status: 500 },
+        );
+      }
+    }
+
+    const nextStatus =
+      action === "approve"
+        ? "approved"
+        : "rejected";
+
     const { data, error } =
       await supabaseAdmin
         .from("clip_submissions")
         .update({
-          status: payload.status,
+          status: nextStatus,
           reviewed_at:
             new Date().toISOString(),
           reviewed_by: auth.user.id,

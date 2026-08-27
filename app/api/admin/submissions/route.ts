@@ -27,12 +27,65 @@ function youtubeThumbnailUrl(
     : null;
 }
 
-export async function GET() {
+function resolveDiscoverCategory(
+  work:
+    | {
+        discover_category: string | null;
+      }
+    | {
+        discover_category: string | null;
+      }[]
+    | null
+    | undefined,
+) {
+  if (!work) {
+    return null;
+  }
+
+  const row = Array.isArray(work)
+    ? work[0]
+    : work;
+
+  return row?.discover_category ?? null;
+}
+
+const ALLOWED_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+] as const;
+
+type SubmissionStatus =
+  (typeof ALLOWED_STATUSES)[number];
+
+function parseStatusParam(
+  value: string | null,
+): SubmissionStatus {
+  if (
+    value &&
+    ALLOWED_STATUSES.includes(
+      value as SubmissionStatus,
+    )
+  ) {
+    return value as SubmissionStatus;
+  }
+
+  return "pending";
+}
+
+export async function GET(
+  request: Request,
+) {
   const auth = await requireAdmin();
 
   if (!auth.ok) {
     return adminAuthErrorResponse(auth);
   }
+
+  const { searchParams } = new URL(request.url);
+  const status = parseStatusParam(
+    searchParams.get("status"),
+  );
 
   try {
     if (!supabaseUrl || !serviceRoleKey) {
@@ -61,9 +114,9 @@ export async function GET() {
       await supabaseAdmin
         .from("clip_submissions")
         .select(
-          "id, user_id, source_url, source_type, source_id, title, thumbnail_url, status, created_at",
+          "id, user_id, source_url, source_type, source_id, title, thumbnail_url, status, created_at, work_id, work:works(discover_category)",
         )
-        .eq("status", "pending")
+        .eq("status", status)
         .order("created_at", {
           ascending: false,
         });
@@ -127,8 +180,18 @@ export async function GET() {
             : null);
 
         return {
-          ...row,
+          id: row.id,
+          user_id: row.user_id,
+          source_url: row.source_url,
+          source_type: row.source_type,
+          source_id: row.source_id,
+          title: row.title,
           thumbnail_url: thumbnail,
+          status: row.status,
+          created_at: row.created_at,
+          work_id: row.work_id,
+          discover_category:
+            resolveDiscoverCategory(row.work),
           submitter:
             row.user_id
               ? submitterEmails.get(
