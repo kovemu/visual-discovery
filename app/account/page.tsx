@@ -1,4 +1,5 @@
 import Header from "@/components/Header";
+import { isRealAccountUser } from "@/lib/auth/userKind";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ProfileEditor from "@/components/account/ProfileEditor";
@@ -10,7 +11,7 @@ export default async function AccountPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  if (!isRealAccountUser(user)) {
     redirect("/login");
   }
 

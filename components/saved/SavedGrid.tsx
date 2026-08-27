@@ -397,6 +397,37 @@ export default function SavedGrid() {
     void loadSaved();
   }, [loadSaved]);
 
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (
+        event === "SIGNED_IN" ||
+        event === "SIGNED_OUT" ||
+        event === "USER_UPDATED"
+      ) {
+        void loadSaved();
+      }
+    });
+
+    function onPicksChanged() {
+      void loadSaved();
+    }
+
+    window.addEventListener(
+      "kovemu-picks-changed",
+      onPicksChanged,
+    );
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener(
+        "kovemu-picks-changed",
+        onPicksChanged,
+      );
+    };
+  }, [loadSaved, supabase]);
+
   async function persistSavedOrder(
     orderedWorks: WorkMediaItem[],
   ) {

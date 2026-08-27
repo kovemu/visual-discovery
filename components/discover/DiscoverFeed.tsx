@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import AuthModal from "@/components/AuthModal";
 import SavedPanel, {
   type SavedPanelWork,
 } from "@/components/discover/SavedPanel";
 import DiscoverCarousel from "@/components/discover/DiscoverCarousel";
 import { useDiscoverFeed } from "@/components/discover/useDiscoverFeed";
 import WorkMediaModal from "@/components/works/WorkMediaModal";
+import {
+  ensurePickSession,
+  PickSessionError,
+} from "@/lib/auth/ensurePickSession";
 import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
@@ -119,13 +122,9 @@ export default function DiscoverFeed({
     useState(0);
   const [mobilePicksOpen, setMobilePicksOpen] =
     useState(false);
-  const [pendingPickWork, setPendingPickWork] =
-    useState<FeedItem | null>(null);
-  const [showLogin, setShowLogin] = useState(false);
-  const [currentUserId, setCurrentUserId] =
-    useState<string | null>(null);
   const [selectedWork, setSelectedWork] =
     useState<FeedItem | null>(null);
+  const [pickError, setPickError] = useState("");
 
   useEffect(() => {
     async function loadPicks() {
@@ -134,13 +133,10 @@ export default function DiscoverFeed({
       } = await supabase.auth.getUser();
 
       if (!user) {
-        setCurrentUserId(null);
         setPickedWorkIds(new Set());
         setPicksLoaded(true);
         return;
       }
-
-      setCurrentUserId(user.id);
 
       const { data, error } = await supabase
         .from("work_picks")
@@ -164,6 +160,35 @@ export default function DiscoverFeed({
     }
 
     void loadPicks();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (
+        event === "SIGNED_IN" ||
+        event === "SIGNED_OUT" ||
+        event === "USER_UPDATED"
+      ) {
+        void loadPicks();
+      }
+    });
+
+    function onPicksChanged() {
+      void loadPicks();
+    }
+
+    window.addEventListener(
+      "kovemu-picks-changed",
+      onPicksChanged,
+    );
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener(
+        "kovemu-picks-changed",
+        onPicksChanged,
+      );
+    };
   }, [supabase]);
 
   function closeWorkModalFromHistory() {
@@ -199,21 +224,20 @@ export default function DiscoverFeed({
   }, [selectedWork, requestCloseWorkModal]);
 
   async function togglePick(work: FeedItem) {
-    let userId = currentUserId;
+    setPickError("");
 
-    if (!userId) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    let userId: string;
 
-      if (!user) {
-        setPendingPickWork(work);
-        setShowLogin(true);
-        return;
-      }
-
+    try {
+      const user = await ensurePickSession();
       userId = user.id;
-      setCurrentUserId(user.id);
+    } catch (error) {
+      setPickError(
+        error instanceof PickSessionError
+          ? error.message
+          : "Could not save this pick.",
+      );
+      return;
     }
 
     const alreadyPicked = pickedWorkIds.has(work.id);
@@ -392,6 +416,12 @@ export default function DiscoverFeed({
           />
         </div>
 
+        {pickError ? (
+          <p className="mb-3 text-sm text-zinc-500">
+            {pickError}
+          </p>
+        ) : null}
+
         <DiscoverCarousel
           key={`${categorySignature}:${debouncedSearch}`}
           works={feed.works}
@@ -433,19 +463,6 @@ export default function DiscoverFeed({
         />
       )}
 
-      <AuthModal
-        open={showLogin}
-        onClose={() => setShowLogin(false)}
-        onSuccess={async () => {
-          if (!pendingPickWork) {
-            return;
-          }
-
-          const workToPick = pendingPickWork;
-          setPendingPickWork(null);
-          await togglePick(workToPick);
-        }}
-      />
     </>
   );
 }

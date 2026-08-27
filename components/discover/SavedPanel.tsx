@@ -11,7 +11,6 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-import AuthModal from "@/components/AuthModal";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -640,14 +639,6 @@ export default function SavedPanel({
     SavedPanelWork[]
   >([]);
   const [
-    showAuthModal,
-    setShowAuthModal,
-  ] = useState(false);
-  const [
-    isAuthenticated,
-    setIsAuthenticated,
-  ] = useState(false);
-  const [
     showAdded,
     setShowAdded,
   ] = useState(false);
@@ -662,13 +653,10 @@ export default function SavedPanel({
     } = await supabase.auth.getUser();
 
     if (!user) {
-      setIsAuthenticated(false);
       setItems([]);
       setLoading(false);
       return;
     }
-
-    setIsAuthenticated(true);
 
     const { data, error } =
       await supabase
@@ -742,6 +730,42 @@ export default function SavedPanel({
   useEffect(() => {
     void loadSaved();
   }, [loadSaved, refreshKey]);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (
+        event === "SIGNED_IN" ||
+        event === "SIGNED_OUT" ||
+        event === "USER_UPDATED"
+      ) {
+        void loadSaved();
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [loadSaved, supabase]);
+
+  useEffect(() => {
+    function onPicksChanged() {
+      void loadSaved();
+    }
+
+    window.addEventListener(
+      "kovemu-picks-changed",
+      onPicksChanged,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "kovemu-picks-changed",
+        onPicksChanged,
+      );
+    };
+  }, [loadSaved]);
 
   useEffect(() => {
     if (pulseKey === 0 || addedCount <= 0) {
@@ -846,16 +870,6 @@ export default function SavedPanel({
               <div className="absolute right-[21px] top-0 h-[156px] w-[108px] animate-pulse rounded-xl bg-[#141414]" />
               <div className="absolute right-[42px] top-0 h-[156px] w-[108px] animate-pulse rounded-xl bg-[#101010]" />
             </div>
-          ) : !isAuthenticated ? (
-            <button
-              type="button"
-              onClick={() =>
-                setShowAuthModal(true)
-              }
-              className="text-sm text-zinc-400 underline"
-            >
-              {t("login")}
-            </button>
           ) : filteredItems.length === 0 ? (
             <p className="text-sm text-zinc-500">
               {savedFilter === "today"
@@ -1009,17 +1023,6 @@ export default function SavedPanel({
           </div>
         </>
       )}
-
-      <AuthModal
-        open={showAuthModal}
-        onClose={() =>
-          setShowAuthModal(false)
-        }
-        onSuccess={() => {
-          setShowAuthModal(false);
-          void loadSaved();
-        }}
-      />
     </>
   );
 }

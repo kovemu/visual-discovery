@@ -1,19 +1,7 @@
 import Header from "@/components/Header";
 import SavedGrid from "@/components/saved/SavedGrid";
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 
-export default async function SavedPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
+export default function SavedPage() {
   return (
     <main className="min-h-screen bg-[#050505] text-white">
       <Header />

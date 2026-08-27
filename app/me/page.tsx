@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import MyKovemuTabs from "@/components/me/MyKovemuTabs";
+import { isRealAccountUser } from "@/lib/auth/userKind";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -10,7 +11,7 @@ export default async function MePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  if (!isRealAccountUser(user)) {
     redirect("/login");
   }
 

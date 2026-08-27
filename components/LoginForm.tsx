@@ -12,6 +12,10 @@ import LegalModal, {
 } from "@/components/legal/LegalModal";
 import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
 import { createClient } from "@/lib/supabase/client";
+import {
+  captureAnonymousPicks,
+  mergeAnonymousPicks,
+} from "@/lib/picks/mergeAnonymousPicks";
 
 type LoginFormProps = {
   onSuccess?: () => void;
@@ -194,6 +198,11 @@ export default function LoginForm({
       return;
     }
 
+    const anonymousPicks =
+      await captureAnonymousPicks(
+        supabase,
+      );
+
     const { data, error } =
       await supabase.auth.signUp({
         email,
@@ -224,6 +233,11 @@ export default function LoginForm({
     });
 
     if (data.session) {
+      await mergeAnonymousPicks(
+        supabase,
+        anonymousPicks,
+      );
+
       if (onSuccess) {
         onSuccess();
       } else {
@@ -241,6 +255,11 @@ export default function LoginForm({
     setLoading(true);
     setMessage("");
 
+    const anonymousPicks =
+      await captureAnonymousPicks(
+        supabase,
+      );
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -251,6 +270,11 @@ export default function LoginForm({
       setLoading(false);
       return;
     }
+
+    await mergeAnonymousPicks(
+      supabase,
+      anonymousPicks,
+    );
 
     setLoading(false);
     setSuccessMessage("");

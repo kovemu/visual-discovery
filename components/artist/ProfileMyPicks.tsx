@@ -8,6 +8,10 @@ import {
 } from "react";
 
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
+import {
+  ensurePickSession,
+  PickSessionError,
+} from "@/lib/auth/ensurePickSession";
 import { createClient } from "@/lib/supabase/client";
 import { insertWorkPick } from "@/lib/picks/insertWorkPick";
 
@@ -302,12 +306,17 @@ export default function ProfileMyPicks() {
   async function togglePick(
     work: ProfilePickWork,
   ) {
-    const {
-      data: { user },
-    } =
-      await supabase.auth.getUser();
+    let user;
 
-    if (!user) {
+    try {
+      user = await ensurePickSession();
+    } catch (error) {
+      console.error(
+        "PICK SESSION ERROR:",
+        error instanceof PickSessionError
+          ? error.message
+          : error,
+      );
       return;
     }
 

@@ -14,7 +14,6 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-import AuthModal from "@/components/AuthModal";
 import { createClient } from "@/lib/supabase/client";
 import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 
@@ -254,11 +253,6 @@ export default function MyPicksPanel({
   const [
     isAuthenticated,
     setIsAuthenticated,
-  ] = useState(false);
-
-  const [
-    showAuthModal,
-    setShowAuthModal,
   ] = useState(false);
 
   const [
@@ -669,25 +663,20 @@ function changeFilter(
     ]);
 
   function handleViewAllClick() {
-    if (isAuthenticated) {
-      const fromMobileDrawer =
-        Boolean(
-          mobileOpen &&
-            onMobileOpenChange,
-        );
+    const fromMobileDrawer =
+      Boolean(
+        mobileOpen &&
+          onMobileOpenChange,
+      );
 
-      closeMobileDrawerFromHistory();
+    closeMobileDrawerFromHistory();
 
-      if (fromMobileDrawer) {
-        router.replace("/me");
-        return;
-      }
-
-      router.push("/me");
+    if (fromMobileDrawer) {
+      router.replace("/saved");
       return;
     }
 
-    setShowAuthModal(true);
+    router.push("/saved");
   }
 
   function openMobileDrawer() {
@@ -1533,30 +1522,6 @@ function changeFilter(
         </div>
       </>
     )}
-
-    <AuthModal
-      open={showAuthModal}
-      onClose={() =>
-        setShowAuthModal(false)
-      }
-      onSuccess={() => {
-        const fromMobileDrawer =
-          Boolean(
-            mobileOpen &&
-              onMobileOpenChange,
-          );
-
-        closeMobileDrawerFromHistory();
-
-        if (fromMobileDrawer) {
-          router.replace("/me");
-          return;
-        }
-
-        router.push("/me");
-      }}
-      replaceOnSuccess
-    />
     </>
   );
 }

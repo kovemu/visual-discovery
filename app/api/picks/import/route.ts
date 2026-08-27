@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 
+import { isAnonymousUser } from "@/lib/auth/userKind";
 import {
   createImportedYouTubeWork,
   ensurePendingClipSubmission,
@@ -22,6 +23,13 @@ export async function POST(request: NextRequest) {
     } = await authSupabase.auth.getUser();
 
     if (!user) {
+      return NextResponse.json(
+        { error: "Login required." },
+        { status: 401 },
+      );
+    }
+
+    if (isAnonymousUser(user)) {
       return NextResponse.json(
         { error: "Login required." },
         { status: 401 },

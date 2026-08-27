@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import AuthModal from "@/components/AuthModal";
 import LogoutButton from "@/components/LogoutButton";
+import { isRealAccountUser } from "@/lib/auth/userKind";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 
@@ -27,11 +28,9 @@ export default function Header() {
   );
 
   const [
-    userEmail,
-    setUserEmail,
-  ] = useState<string | null>(
-    null,
-  );
+    isRealUser,
+    setIsRealUser,
+  ] = useState(false);
 
   const [
     authLoading,
@@ -50,8 +49,8 @@ export default function Header() {
       } =
         await supabase.auth.getUser();
 
-      setUserEmail(
-        user?.email ?? null,
+      setIsRealUser(
+        isRealAccountUser(user),
       );
 
       setAuthLoading(false);
@@ -69,10 +68,10 @@ export default function Header() {
           _event,
           session,
         ) => {
-          setUserEmail(
-            session?.user
-              ?.email ??
-              null,
+          setIsRealUser(
+            isRealAccountUser(
+              session?.user,
+            ),
           );
 
           setAuthLoading(false);
@@ -138,7 +137,7 @@ export default function Header() {
           </nav>
 
           {!authLoading &&
-            (userEmail ? (
+            (isRealUser ? (
               <LogoutButton />
             ) : (
               <button
