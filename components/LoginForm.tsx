@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   FormEvent,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -11,6 +12,15 @@ import LegalModal, {
   type LegalModalType,
 } from "@/components/legal/LegalModal";
 import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
+import {
+  isObfuscatedExistingSignup,
+  mapLoginError,
+  mapResetError,
+  mapSignupError,
+  MIN_PASSWORD_LENGTH,
+} from "@/lib/auth/authErrors";
+import { getEmailRedirectTo } from "@/lib/auth/emailRedirect";
+import { normalizeEmail } from "@/lib/auth/normalizeEmail";
 import { createClient } from "@/lib/supabase/client";
 import {
   captureAnonymousPicks,
@@ -23,6 +33,7 @@ type LoginFormProps = {
   presentation?: "page" | "modal";
   accountCreated?: boolean;
   nextPath?: string;
+  linkError?: boolean;
   onModeChange?: (
     mode: "login" | "signup",
   ) => void;
@@ -30,88 +41,16 @@ type LoginFormProps = {
 
 const SIGNUP_SUCCESS_MESSAGE =
   "Account created successfully. Log in to continue.";
+const RESET_SENT_MESSAGE =
+  "If an account exists for this email, we sent a reset link.";
+const DUPLICATE_EMAIL_MESSAGE =
+  "An account with this email already exists.";
 
-const inputClassName =
+const pageInputClassName =
   "h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm text-gray-950 outline-none transition focus:border-fuchsia-400 focus:ring-2 focus:ring-fuchsia-100 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#ffffff] [&:-webkit-autofill]:[-webkit-text-fill-color:#111827] [&:-webkit-autofill:hover]:shadow-[inset_0_0_0_1000px_#ffffff] [&:-webkit-autofill:focus]:shadow-[inset_0_0_0_1000px_#ffffff]";
 
-function isAlreadyRegisteredError(error: {
-  message?: string;
-  code?: string;
-}) {
-  const message = (
-    error.message ?? ""
-  ).toLowerCase();
-  const code = (
-    error.code ?? ""
-  ).toLowerCase();
-
-  return (
-    code === "user_already_exists" ||
-    message.includes(
-      "user already registered",
-    ) ||
-    message.includes(
-      "already registered",
-    )
-  );
-}
-
-function mapSignupError(error: {
-  message?: string;
-  code?: string;
-}) {
-  if (isAlreadyRegisteredError(error)) {
-    return {
-      type: "already_registered" as const,
-    };
-  }
-
-  const message = (
-    error.message ?? ""
-  ).toLowerCase();
-
-  if (
-    message.includes(
-      "password should be at least",
-    ) ||
-    message.includes(
-      "password must be at least",
-    ) ||
-    (message.includes("password") &&
-      message.includes("6"))
-  ) {
-    return {
-      type: "message" as const,
-      message:
-        "Password must be at least 6 characters.",
-    };
-  }
-
-  if (
-    message.includes(
-      "valid email",
-    ) ||
-    message.includes(
-      "invalid email",
-    ) ||
-    message.includes(
-      "unable to validate email",
-    )
-  ) {
-    return {
-      type: "message" as const,
-      message:
-        "Enter a valid email address.",
-    };
-  }
-
-  return {
-    type: "message" as const,
-    message:
-      error.message ??
-      "Something went wrong.",
-  };
-}
+const modalInputClassName =
+  "h-11 w-full rounded-lg border border-zinc-800 bg-[#181818] px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#181818] [&:-webkit-autofill]:[-webkit-text-fill-color:#ffffff] [&:-webkit-autofill:hover]:shadow-[inset_0_0_0_1000px_#181818] [&:-webkit-autofill:focus]:shadow-[inset_0_0_0_1000px_#181818]";
 
 export default function LoginForm({
   onSuccess,
@@ -119,10 +58,12 @@ export default function LoginForm({
   presentation,
   accountCreated = false,
   nextPath,
+  linkError = false,
   onModeChange,
 }: LoginFormProps) {
   const supabase = createClient();
   const router = useRouter();
+  const inFlightRef = useRef(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -130,7 +71,11 @@ export default function LoginForm({
     confirmPassword,
     setConfirmPassword,
   ] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(
+    linkError
+      ? "This link is invalid or has expired."
+      : "",
+  );
   const [
     successMessage,
     setSuccessMessage,
@@ -139,12 +84,17 @@ export default function LoginForm({
     alreadyRegistered,
     setAlreadyRegistered,
   ] = useState(false);
+  const [panel, setPanel] = useState<
+    "auth" | "forgot"
+  >("auth");
   const [loading, setLoading] = useState(false);
   const [legalModal, setLegalModal] =
     useState<LegalModalType | null>(null);
 
   const resolvedPresentation =
     presentation ?? "page";
+  const isModal =
+    resolvedPresentation === "modal";
   const isSignup = mode === "signup";
   const showHeading =
     resolvedPresentation === "page" ||
@@ -152,6 +102,14 @@ export default function LoginForm({
   const showFooter =
     resolvedPresentation === "page" ||
     resolvedPresentation === "modal";
+  const inputClassName = isModal
+    ? modalInputClassName
+    : pageInputClassName;
+  const accentLinkClass = isModal
+    ? "font-semibold text-violet-400 transition hover:text-violet-300"
+    : "font-semibold text-fuchsia-600 transition hover:text-fuchsia-700";
+
+  const skipModeResetRef = useRef(true);
 
   useEffect(() => {
     if (!isSignup && accountCreated) {
@@ -161,134 +119,251 @@ export default function LoginForm({
     }
   }, [isSignup, accountCreated]);
 
-  function switchToLoginAfterSignup() {
-    setSuccessMessage(
-      SIGNUP_SUCCESS_MESSAGE,
-    );
+  useEffect(() => {
+    if (skipModeResetRef.current) {
+      skipModeResetRef.current = false;
+      return;
+    }
+
+    inFlightRef.current = false;
+    setLoading(false);
     setMessage("");
     setAlreadyRegistered(false);
     setConfirmPassword("");
-    setPassword("");
+    setPanel("auth");
 
-    if (
-      resolvedPresentation === "modal"
-    ) {
-      onModeChange?.("login");
+    if (isSignup) {
+      setSuccessMessage("");
+    }
+  }, [mode, isSignup]);
+
+  function clearFeedback() {
+    setMessage("");
+    setAlreadyRegistered(false);
+  }
+
+  function finishAuthenticated() {
+    setSuccessMessage("");
+
+    if (onSuccess) {
+      onSuccess();
       return;
     }
 
-    if (
-      resolvedPresentation === "page"
-    ) {
-      router.push("/login?created=1");
+    router.push(nextPath || "/");
+    router.refresh();
+  }
+
+  function applySignupError(error: {
+    code?: string;
+    message?: string;
+  }) {
+    const mapped = mapSignupError(error);
+
+    if (mapped.type === "already_registered") {
+      setAlreadyRegistered(true);
+      return;
     }
+
+    setMessage(mapped.message);
+  }
+
+  function validateJoin(normalizedEmail: string) {
+    if (!normalizedEmail) {
+      return "Enter a valid email address.";
+    }
+
+    if (!password) {
+      return "Enter a password.";
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    }
+
+    if (!confirmPassword) {
+      return "Confirm your password.";
+    }
+
+    if (password !== confirmPassword) {
+      return "Passwords do not match.";
+    }
+
+    return null;
+  }
+
+  function validateLogin(normalizedEmail: string) {
+    if (!normalizedEmail) {
+      return "Enter a valid email address.";
+    }
+
+    if (!password) {
+      return "Enter a password.";
+    }
+
+    return null;
   }
 
   const signUp = async () => {
-    setLoading(true);
-    setMessage("");
-    setSuccessMessage("");
-    setAlreadyRegistered(false);
+    const normalizedEmail = normalizeEmail(email);
+    const validationError = validateJoin(normalizedEmail);
 
-    if (password !== confirmPassword) {
-      setMessage(
-        "Passwords do not match.",
-      );
-      setLoading(false);
+    if (validationError) {
+      setMessage(validationError);
       return;
     }
 
-    const anonymousPicks =
-      await captureAnonymousPicks(
-        supabase,
-      );
+    if (inFlightRef.current) {
+      return;
+    }
 
-    const { data, error } =
-      await supabase.auth.signUp({
-        email,
-        password,
-      });
+    inFlightRef.current = true;
+    setLoading(true);
+    clearFeedback();
+    setSuccessMessage("");
 
-    if (error) {
-      const mapped =
-        mapSignupError(error);
+    try {
+      const anonymousPicks =
+        await captureAnonymousPicks(
+          supabase,
+        );
 
-      if (
-        mapped.type ===
-        "already_registered"
-      ) {
-        setAlreadyRegistered(true);
-      } else {
-        setMessage(mapped.message);
+      const { data, error } =
+        await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+        });
+
+      if (error) {
+        applySignupError(error);
+        return;
       }
 
-      setLoading(false);
-      return;
-    }
+      if (isObfuscatedExistingSignup(data.user)) {
+        setAlreadyRegistered(true);
+        return;
+      }
 
-    setLoading(false);
+      if (!data.session) {
+        setMessage(
+          "Could not create your account. Please try again.",
+        );
+        return;
+      }
 
-    trackProductEvent({
-      event_name: "signup",
-    });
+      trackProductEvent({
+        event_name: "signup",
+      });
 
-    if (data.session) {
       await mergeAnonymousPicks(
         supabase,
         anonymousPicks,
       );
 
-      if (onSuccess) {
-        onSuccess();
-      } else {
-        router.refresh();
-      }
-      return;
-    }
-
-    if (data.user) {
-      switchToLoginAfterSignup();
+      finishAuthenticated();
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
     }
   };
 
   const signIn = async () => {
-    setLoading(true);
-    setMessage("");
+    const normalizedEmail = normalizeEmail(email);
+    const validationError = validateLogin(normalizedEmail);
 
-    const anonymousPicks =
-      await captureAnonymousPicks(
-        supabase,
-      );
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      setMessage(error.message);
-      setLoading(false);
+    if (validationError) {
+      setMessage(validationError);
       return;
     }
 
-    await mergeAnonymousPicks(
-      supabase,
-      anonymousPicks,
-    );
+    if (inFlightRef.current) {
+      return;
+    }
 
-    setLoading(false);
+    inFlightRef.current = true;
+    setLoading(true);
+    clearFeedback();
+
+    try {
+      const anonymousPicks =
+        await captureAnonymousPicks(
+          supabase,
+        );
+
+      const { error } =
+        await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+
+      if (error) {
+        setMessage(mapLoginError(error));
+        return;
+      }
+
+      await mergeAnonymousPicks(
+        supabase,
+        anonymousPicks,
+      );
+
+      finishAuthenticated();
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
+    }
+  };
+
+  const sendResetLink = async () => {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      setMessage("Enter a valid email address.");
+      return;
+    }
+
+    if (inFlightRef.current) {
+      return;
+    }
+
+    inFlightRef.current = true;
+    setLoading(true);
+    setMessage("");
     setSuccessMessage("");
 
-    if (onSuccess) {
-      onSuccess();
-    } else {
-      router.push(nextPath || "/");
-      router.refresh();
+    try {
+      const { error } =
+        await supabase.auth.resetPasswordForEmail(
+          normalizedEmail,
+          {
+            redirectTo: getEmailRedirectTo(
+              "/auth/update-password",
+            ),
+          },
+        );
+
+      if (error) {
+        setMessage(mapResetError(error));
+        return;
+      }
+
+      setSuccessMessage(RESET_SENT_MESSAGE);
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
     }
   };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
+
+    if (loading || inFlightRef.current) {
+      return;
+    }
+
+    if (panel === "forgot") {
+      await sendResetLink();
+      return;
+    }
 
     if (isSignup) {
       await signUp();
@@ -315,29 +390,83 @@ export default function LoginForm({
       ? `modal-${mode}-confirm-password`
       : "join-confirm-password";
 
+  const heading =
+    panel === "forgot"
+      ? "Reset password"
+      : isSignup
+        ? isModal
+          ? "Join KOVEMU"
+          : "Join Kovemu"
+        : isModal
+          ? "Log in"
+          : "Welcome to Kovemu";
+
+  const description =
+    panel === "forgot"
+      ? "Enter your email and we will send a reset link."
+      : !isSignup
+        ? isModal
+          ? "Pick, save, and keep discovering."
+          : "Discover Korean artists you'll love."
+        : isModal
+          ? null
+          : "Discover and save artists you love.";
+
+  function renderLoginCta(label = "Log in") {
+    if (isModal) {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            clearFeedback();
+            setSuccessMessage("");
+            setPanel("auth");
+            onModeChange?.("login");
+          }}
+          className={accentLinkClass}
+        >
+          {label}
+        </button>
+      );
+    }
+
+    return (
+      <Link href="/login" className={accentLinkClass}>
+        {label}
+      </Link>
+    );
+  }
+
   return (
     <div>
       {showHeading && (
         <>
           <h1
             id={
-              resolvedPresentation ===
-              "modal"
+              isModal
                 ? "auth-modal-title"
                 : undefined
             }
-            className="text-center text-2xl font-black tracking-tight text-gray-950"
+            className={`text-center font-semibold tracking-tight ${
+              isModal
+                ? "text-xl text-white"
+                : "text-2xl font-black text-gray-950"
+            }`}
           >
-            {isSignup
-              ? "Join Kovemu"
-              : "Welcome to Kovemu"}
+            {heading}
           </h1>
 
-          <p className="mt-2 text-center text-sm leading-6 text-gray-500">
-            {isSignup
-              ? "Discover and save artists you love."
-              : "Discover Korean artists you'll love."}
-          </p>
+          {description && (
+            <p
+              className={`mt-2 text-center text-sm leading-6 ${
+                isModal
+                  ? "text-zinc-500"
+                  : "text-gray-500"
+              }`}
+            >
+              {description}
+            </p>
+          )}
         </>
       )}
 
@@ -345,168 +474,215 @@ export default function LoginForm({
         onSubmit={handleSubmit}
         className={
           showHeading
-            ? "mt-8 space-y-5"
+            ? isModal
+              ? "mt-6 space-y-4"
+              : "mt-8 space-y-5"
             : "space-y-4"
         }
       >
-        {!isSignup &&
-          successMessage && (
-            <p className="rounded-xl border border-fuchsia-100 bg-fuchsia-50 px-4 py-3 text-sm leading-5 text-fuchsia-700">
+          {!isSignup &&
+            panel === "auth" &&
+            successMessage && (
+              <p
+                className={
+                  isModal
+                    ? "rounded-lg border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm leading-5 text-violet-300"
+                    : "rounded-xl border border-fuchsia-100 bg-fuchsia-50 px-4 py-3 text-sm leading-5 text-fuchsia-700"
+                }
+              >
+                {successMessage}
+              </p>
+            )}
+
+          {panel === "forgot" && successMessage && (
+            <p
+              className={
+                isModal
+                  ? "rounded-lg border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm leading-5 text-violet-300"
+                  : "rounded-xl border border-fuchsia-100 bg-fuchsia-50 px-4 py-3 text-sm leading-5 text-fuchsia-700"
+              }
+            >
               {successMessage}
             </p>
           )}
 
-        <div>
-          <label
-            htmlFor={emailId}
-            className="mb-2 block text-sm font-semibold text-gray-800"
-          >
-            Email
-          </label>
-
-          <input
-            id={emailId}
-            type="email"
-            value={email}
-            onChange={(event) =>
-              setEmail(event.target.value)
-            }
-            placeholder="you@example.com"
-            required
-            autoComplete="email"
-            className={inputClassName}
-          />
-        </div>
-
-        <div>
-          <label
-            htmlFor={passwordId}
-            className="mb-2 block text-sm font-semibold text-gray-800"
-          >
-            Password
-          </label>
-
-          <input
-            id={passwordId}
-            type="password"
-            value={password}
-            onChange={(event) =>
-              setPassword(
-                event.target.value,
-              )
-            }
-            placeholder="Password"
-            required
-            minLength={6}
-            autoComplete={
-              isSignup
-                ? "new-password"
-                : "current-password"
-            }
-            className={inputClassName}
-          />
-        </div>
-
-        {isSignup && (
           <div>
             <label
-              htmlFor={confirmPasswordId}
-              className="mb-2 block text-sm font-semibold text-gray-800"
+              htmlFor={emailId}
+              className={`mb-2 block text-sm font-medium ${
+                isModal
+                  ? "text-zinc-300"
+                  : "font-semibold text-gray-800"
+              }`}
             >
-              Confirm password
+              Email
             </label>
 
             <input
-              id={confirmPasswordId}
-              type="password"
-              value={confirmPassword}
+              id={emailId}
+              type="email"
+              value={email}
               onChange={(event) =>
-                setConfirmPassword(
-                  event.target.value,
-                )
+                setEmail(event.target.value)
               }
-              placeholder="Confirm password"
+              placeholder="you@example.com"
               required
-              minLength={6}
-              autoComplete="new-password"
+              autoComplete="email"
               className={inputClassName}
             />
           </div>
-        )}
 
-        {alreadyRegistered ? (
-          <p className="text-sm leading-5 text-red-500">
-            This email is already
-            registered.{" "}
-            {resolvedPresentation ===
-            "modal" ? (
+          {panel === "auth" && (
+            <div>
+              <label
+                htmlFor={passwordId}
+                className={`mb-2 block text-sm font-medium ${
+                  isModal
+                    ? "text-zinc-300"
+                    : "font-semibold text-gray-800"
+                }`}
+              >
+                Password
+              </label>
+
+              <input
+                id={passwordId}
+                type="password"
+                value={password}
+                onChange={(event) =>
+                  setPassword(event.target.value)
+                }
+                placeholder="Password"
+                required
+                minLength={
+                  isSignup ? MIN_PASSWORD_LENGTH : undefined
+                }
+                autoComplete={
+                  isSignup
+                    ? "new-password"
+                    : "current-password"
+                }
+                className={inputClassName}
+              />
+            </div>
+          )}
+
+          {panel === "auth" && isSignup && (
+            <div>
+              <label
+                htmlFor={confirmPasswordId}
+                className={`mb-2 block text-sm font-medium ${
+                  isModal
+                    ? "text-zinc-300"
+                    : "font-semibold text-gray-800"
+                }`}
+              >
+                Confirm password
+              </label>
+
+              <input
+                id={confirmPasswordId}
+                type="password"
+                value={confirmPassword}
+                onChange={(event) =>
+                  setConfirmPassword(
+                    event.target.value,
+                  )
+                }
+                placeholder="Confirm password"
+                required
+                minLength={MIN_PASSWORD_LENGTH}
+                autoComplete="new-password"
+                className={inputClassName}
+              />
+            </div>
+          )}
+
+          {panel === "auth" && !isSignup && (
+            <div className="text-right">
               <button
                 type="button"
                 onClick={() => {
-                  setAlreadyRegistered(
-                    false,
-                  );
-                  setMessage("");
-                  onModeChange?.(
-                    "login",
-                  );
+                  clearFeedback();
+                  setSuccessMessage("");
+                  setPanel("forgot");
                 }}
-                className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+                className={`text-sm ${accentLinkClass}`}
               >
-                Log in
+                Forgot password?
               </button>
-            ) : (
-              <Link
-                href="/login"
-                className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
-              >
-                Log in
-              </Link>
-            )}{" "}
-            instead.
-          </p>
-        ) : (
-          message && (
-            <p className="text-sm leading-5 text-red-500">
-              {message}
+            </div>
+          )}
+
+          {alreadyRegistered ? (
+            <p className="text-sm leading-5 text-red-400">
+              {DUPLICATE_EMAIL_MESSAGE}{" "}
+              {renderLoginCta()} instead.
             </p>
-          )
-        )}
+          ) : (
+            message && (
+              <p className="text-sm leading-5 text-red-400">
+                {message}
+              </p>
+            )
+          )}
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="h-12 w-full rounded-full bg-fuchsia-600 text-sm font-bold text-white transition hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading
-            ? "Please wait..."
-            : isSignup
-              ? "Create account"
-              : "Log in"}
-        </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className={
+              isModal
+                ? "h-11 w-full rounded-lg bg-violet-600 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                : "h-12 w-full rounded-full bg-fuchsia-600 text-sm font-bold text-white transition hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50"
+            }
+          >
+            {loading
+              ? "Please wait..."
+              : panel === "forgot"
+                ? "Send reset link"
+                : isSignup
+                  ? "Join"
+                  : "Log in"}
+          </button>
 
-        {isSignup && (
-          <p className="text-center text-xs leading-5 text-gray-500">
-            By creating an account, you agree to our{" "}
-            <button
-              type="button"
-              onClick={() => setLegalModal("terms")}
-              className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+          {panel === "auth" && isSignup && (
+            <p
+              className={`text-center text-xs leading-5 ${
+                isModal
+                  ? "text-zinc-500"
+                  : "text-gray-500"
+              }`}
             >
-              Terms
-            </button>{" "}
-            and{" "}
-            <button
-              type="button"
-              onClick={() => setLegalModal("privacy")}
-              className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+              By creating an account, you agree to our{" "}
+              <button
+                type="button"
+                onClick={() => setLegalModal("terms")}
+                className={accentLinkClass}
+              >
+                Terms
+              </button>{" "}
+              and{" "}
+              <button
+                type="button"
+                onClick={() => setLegalModal("privacy")}
+                className={accentLinkClass}
+              >
+                Privacy Policy
+              </button>
+              .
+            </p>
+          )}
+
+          {panel === "forgot" && (
+            <p
+              className={`text-center text-sm ${
+                isModal ? "text-zinc-500" : "text-gray-500"
+              }`}
             >
-              Privacy Policy
-            </button>
-            .
-          </p>
-        )}
-      </form>
+              {renderLoginCta("Back to log in")}
+            </p>
+          )}
+        </form>
 
       {isSignup && legalModal && (
         <LegalModal
@@ -516,48 +692,42 @@ export default function LoginForm({
         />
       )}
 
-      {showFooter && (
+      {showFooter && panel === "auth" && (
         <>
-        <div className="mt-6 text-center text-sm text-gray-500">
-          {resolvedPresentation ===
-          "modal" ? (
+        <div
+          className={`mt-6 text-center text-sm ${
+            isModal
+              ? "text-zinc-500"
+              : "text-gray-500"
+          }`}
+        >
+          {isModal ? (
             isSignup ? (
               <>
                 Already have an account?{" "}
                 <button
                   type="button"
                   onClick={() => {
-                    setMessage("");
-                    setAlreadyRegistered(
-                      false,
-                    );
-                    setSuccessMessage(
-                      "",
-                    );
-                    onModeChange?.(
-                      "login",
-                    );
+                    clearFeedback();
+                    setSuccessMessage("");
+                    onModeChange?.("login");
                   }}
-                  className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+                  className={accentLinkClass}
                 >
                   Log in
                 </button>
               </>
             ) : (
               <>
-                New to Kovemu?{" "}
+                New to KOVEMU?{" "}
                 <button
                   type="button"
                   onClick={() => {
-                    setMessage("");
-                    setSuccessMessage(
-                      "",
-                    );
-                    onModeChange?.(
-                      "signup",
-                    );
+                    clearFeedback();
+                    setSuccessMessage("");
+                    onModeChange?.("signup");
                   }}
-                  className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+                  className={accentLinkClass}
                 >
                   Join
                 </button>
@@ -568,7 +738,7 @@ export default function LoginForm({
               Already have an account?{" "}
               <Link
                 href="/login"
-                className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+                className={accentLinkClass}
               >
                 Log in
               </Link>
@@ -578,7 +748,7 @@ export default function LoginForm({
               New to Kovemu?{" "}
               <Link
                 href="/join"
-                className="font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+                className={accentLinkClass}
               >
                 Join
               </Link>
@@ -586,11 +756,21 @@ export default function LoginForm({
           )}
         </div>
 
-        <div className="mt-5 text-center text-xs text-gray-400">
+        <div
+          className={`mt-5 text-center ${
+            isModal
+              ? "text-[11px] text-zinc-600"
+              : "text-xs text-gray-400"
+          }`}
+        >
           Contact:{" "}
           <a
             href="mailto:kovemusin@gmail.com"
-            className="font-medium transition hover:text-fuchsia-600"
+            className={
+              isModal
+                ? "transition hover:text-zinc-400"
+                : "font-medium transition hover:text-fuchsia-600"
+            }
           >
             kovemusin@gmail.com
           </a>

@@ -9,6 +9,7 @@ import {
 
 import AuthModal from "@/components/AuthModal";
 import Header from "@/components/Header";
+import { isRealAccountUser } from "@/lib/auth/userKind";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 
@@ -29,9 +30,9 @@ export default function SubmitPage() {
   const [submitting, setSubmitting] =
     useState(false);
   const [
-    currentUserId,
-    setCurrentUserId,
-  ] = useState<string | null>(null);
+    isRealUser,
+    setIsRealUser,
+  ] = useState(false);
   const [
     authChecked,
     setAuthChecked,
@@ -48,8 +49,8 @@ export default function SubmitPage() {
       } =
         await supabase.auth.getUser();
 
-      setCurrentUserId(
-        user?.id ?? null,
+      setIsRealUser(
+        isRealAccountUser(user),
       );
       setAuthChecked(true);
     }
@@ -69,7 +70,7 @@ export default function SubmitPage() {
       return;
     }
 
-    if (!currentUserId) {
+    if (!isRealUser) {
       setShowAuthModal(true);
       return;
     }
@@ -141,7 +142,7 @@ export default function SubmitPage() {
         </p>
 
         {authChecked &&
-          !currentUserId && (
+          !isRealUser && (
             <p className="mt-4 text-sm text-zinc-300">
               {t("submitLoginRequired")}{" "}
               <button
@@ -235,8 +236,8 @@ export default function SubmitPage() {
           } =
             await supabase.auth.getUser();
 
-          setCurrentUserId(
-            user?.id ?? null,
+          setIsRealUser(
+            isRealAccountUser(user),
           );
           setShowAuthModal(false);
         }}

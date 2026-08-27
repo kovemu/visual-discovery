@@ -1,6 +1,7 @@
 import type { User } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+import { isAnonymousUser } from "@/lib/auth/userKind";
 import { createClient } from "@/lib/supabase/server";
 
 export type AdminAuthResult =
@@ -30,7 +31,7 @@ export async function requireAdmin(): Promise<AdminAuthResult> {
     error,
   } = await supabase.auth.getUser();
 
-  if (error || !user) {
+  if (error || !user || isAnonymousUser(user)) {
     return {
       ok: false,
       reason: "unauthenticated",

@@ -118,11 +118,11 @@ export default function AuthModal({
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 p-4 backdrop-blur-[2px]"
       onClick={requestClose}
     >
       <div
-        className="relative max-h-[90vh] w-full max-w-[440px] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl sm:p-8"
+        className="relative max-h-[90vh] w-[calc(100%-32px)] max-w-[420px] overflow-y-auto rounded-xl border border-white/[0.08] bg-[#111111] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.55)] sm:p-8"
         onClick={(event) =>
           event.stopPropagation()
         }
@@ -134,18 +134,25 @@ export default function AuthModal({
           type="button"
           onClick={requestClose}
           aria-label="Close auth modal"
-          className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full text-xl text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center text-lg text-zinc-500 transition hover:text-white"
         >
           ×
         </button>
 
-        <div className="mb-6 pt-2 text-center">
+        <div className="mb-6 flex justify-center pt-1">
           <Link
             href="/"
             onClick={handleHomeClick}
-            className="inline-block text-[30px] font-black leading-none text-fuchsia-600 transition hover:text-fuchsia-700"
+            className="group inline-flex items-center gap-2"
+            aria-label="KOVEMU home"
           >
-            Kovemu
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 rounded-full bg-violet-500"
+            />
+            <span className="text-[13px] font-semibold uppercase tracking-[0.34em] text-white">
+              KOVEMU
+            </span>
           </Link>
         </div>
 

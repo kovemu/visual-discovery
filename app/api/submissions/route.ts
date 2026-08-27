@@ -4,6 +4,7 @@ import {
 } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 
+import { isAnonymousUser } from "@/lib/auth/userKind";
 import { parseSubmissionUrl } from "@/lib/submissions/parseSubmissionUrl";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,7 +24,7 @@ export async function POST(
     } =
       await authSupabase.auth.getUser();
 
-    if (!user) {
+    if (!user || isAnonymousUser(user)) {
       return NextResponse.json(
         { error: "Login required." },
         { status: 401 },

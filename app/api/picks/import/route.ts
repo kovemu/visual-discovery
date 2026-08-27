@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     if (isAnonymousUser(user)) {
       return NextResponse.json(
         { error: "Login required." },
-        { status: 401 },
+        { status: 403 },
       );
     }
 

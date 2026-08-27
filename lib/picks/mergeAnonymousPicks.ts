@@ -108,6 +108,29 @@ export async function mergeAnonymousPicks(
     (snapshot) => !existingIds.has(snapshot.work_id),
   );
 
+  if (toInsert.length === 0) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new Event("kovemu-picks-changed"),
+      );
+    }
+    return;
+  }
+
+  const { data: frontRow } = await supabase
+    .from("work_picks")
+    .select("sort_order")
+    .eq("user_id", user.id)
+    .not("sort_order", "is", null)
+    .order("sort_order", {
+      ascending: true,
+    })
+    .limit(1)
+    .maybeSingle();
+
+  let nextOrder =
+    (asSortOrder(frontRow?.sort_order) ?? 0) - 1;
+
   for (const snapshot of toInsert) {
     const { error } = await supabase
       .from("work_picks")
@@ -115,10 +138,11 @@ export async function mergeAnonymousPicks(
         user_id: user.id,
         work_id: snapshot.work_id,
         artist_id: snapshot.artist_id,
-        sort_order: snapshot.sort_order,
+        sort_order: nextOrder,
       });
 
     if (!error) {
+      nextOrder -= 1;
       continue;
     }
 

@@ -2,19 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import LoginForm from "@/components/LoginForm";
-
-function getSafeNextPath(value: string | undefined) {
-  if (
-    !value ||
-    !value.startsWith("/") ||
-    value.startsWith("//") ||
-    value.includes("://")
-  ) {
-    return undefined;
-  }
-
-  return value;
-}
+import { getSafeNextPath } from "@/lib/auth/safeNextPath";
 
 function AuthShell({
   children,
@@ -47,6 +35,7 @@ export default async function LoginPage({
   searchParams: Promise<{
     created?: string;
     next?: string;
+    error?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -59,6 +48,7 @@ export default async function LoginPage({
         accountCreated={
           params.created === "1"
         }
+        linkError={params.error === "auth"}
         nextPath={getSafeNextPath(params.next)}
       />
     </AuthShell>
