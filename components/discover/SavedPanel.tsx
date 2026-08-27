@@ -15,7 +15,6 @@ import AuthModal from "@/components/AuthModal";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 import {
-  getSourceLabel,
   getWorkThumbnail,
   type WorkMediaItem,
 } from "@/lib/works/workDisplay";
@@ -23,6 +22,7 @@ import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 
 export type SavedPanelWork = WorkMediaItem & {
   caption?: string | null;
+  pickedAt: string;
 };
 
 type PickedWorkRow = {
@@ -71,18 +71,97 @@ type SavedPanelProps = {
 };
 
 const SAVED_STACK_ID = "saved-panel-stack";
-const MAX_VISIBLE_CARDS = 5;
+const CARDS_PER_ROW = 6;
+const CARD_WIDTH_PX = 108;
+const STACK_GAP_COLLAPSED_PX = 21;
+const STACK_GAP_EXPANDED_PX = 36;
+const HOVERED_CARD_Z_INDEX = 50;
+const STACK_TRANSITION_MS = 220;
+
+function getCardRightOffset(
+  index: number,
+  count: number,
+  gap: number,
+) {
+  return (count - 1 - index) * gap;
+}
+
+function resolveHoveredCardIdFromPointer(
+  clientX: number,
+  containerRect: DOMRect,
+  works: SavedPanelWork[],
+  gap: number,
+) {
+  const xFromRight =
+    containerRect.right - clientX;
+
+  for (
+    let index = works.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    const right = getCardRightOffset(
+      index,
+      works.length,
+      gap,
+    );
+    const stripStart =
+      index === 0
+        ? right
+        : getCardRightOffset(
+            index - 1,
+            works.length,
+            gap,
+          );
+    const stripEnd = right + CARD_WIDTH_PX;
+
+    if (
+      xFromRight > stripStart &&
+      xFromRight <= stripEnd
+    ) {
+      return works[index]?.id ?? null;
+    }
+  }
+
+  return null;
+}
+
+function isToday(dateString: string) {
+  const date = new Date(dateString);
+  const today = new Date();
+
+  return (
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  );
+}
+
+function chunkWorksIntoRows(
+  works: SavedPanelWork[],
+) {
+  const rows: SavedPanelWork[][] = [];
+
+  for (
+    let index = 0;
+    index < works.length;
+    index += CARDS_PER_ROW
+  ) {
+    rows.push(
+      works.slice(index, index + CARDS_PER_ROW),
+    );
+  }
+
+  return rows;
+}
 
 function mapPickedWork(
   work: PickedWorkRow,
+  pickedAt: string,
 ): SavedPanelWork | null {
   const artist = Array.isArray(work.artist)
     ? work.artist[0]
     : work.artist;
-
-  if (!artist) {
-    return null;
-  }
 
   const isYoutube =
     work.source === "youtube" &&
@@ -93,8 +172,8 @@ function mapPickedWork(
 
   return {
     id: String(work.id),
-    artistId: artist.id,
-    artistName: artist.name,
+    artistId: artist?.id ?? "",
+    artistName: artist?.name ?? "",
     source: work.source,
     type: isYoutube
       ? "youtube"
@@ -114,7 +193,10 @@ function mapPickedWork(
       work.description ??
       work.title ??
       null,
+    title: work.title,
+    description: work.description,
     sourceUrl: work.source_url,
+    pickedAt,
   };
 }
 
@@ -163,27 +245,23 @@ function hitTestPickCardId(
   return null;
 }
 
-type SavedCardStackProps = {
+type SavedCardStackRowProps = {
   works: SavedPanelWork[];
+  stackId: string;
   onWorkClick: (
     work: SavedPanelWork,
   ) => void;
   onUnsave: (
     work: SavedPanelWork,
   ) => void;
-  sourceLabels: {
-    youtube: string;
-    tiktok: string;
-    image: string;
-  };
 };
 
-function SavedCardStack({
+function SavedCardStackRow({
   works,
+  stackId,
   onWorkClick,
   onUnsave,
-  sourceLabels,
-}: SavedCardStackProps) {
+}: SavedCardStackRowProps) {
   const [
     hoveredStack,
     setHoveredStack,
@@ -196,6 +274,10 @@ function SavedCardStack({
     scrubbingStack,
     setScrubbingStack,
   ] = useState(false);
+  const [
+    hoveredCardId,
+    setHoveredCardId,
+  ] = useState<string | null>(null);
 
   const cardScrubRef = useRef<{
     pointerId: number;
@@ -205,18 +287,36 @@ function SavedCardStack({
     captured: boolean;
   } | null>(null);
   const suppressCardClickRef = useRef(false);
+  const rowRef = useRef<HTMLDivElement>(null);
 
-  const visibleWorks = works.slice(
-    0,
-    MAX_VISIBLE_CARDS,
-  );
-  const hiddenCount = Math.max(
-    0,
-    works.length - visibleWorks.length,
-  );
   const expanded =
     hoveredStack || scrubbingStack;
-  const gap = expanded ? 36 : 21;
+  const gap = expanded
+    ? STACK_GAP_EXPANDED_PX
+    : STACK_GAP_COLLAPSED_PX;
+  const maxStackWidth =
+    CARD_WIDTH_PX +
+    Math.max(0, works.length - 1) *
+      STACK_GAP_EXPANDED_PX;
+
+  function updateHoveredCardFromPointer(
+    clientX: number,
+  ) {
+    const row = rowRef.current;
+
+    if (!row) {
+      return;
+    }
+
+    setHoveredCardId(
+      resolveHoveredCardIdFromPointer(
+        clientX,
+        row.getBoundingClientRect(),
+        works,
+        gap,
+      ),
+    );
+  }
 
   function resetCardScrub() {
     cardScrubRef.current = null;
@@ -277,7 +377,7 @@ function SavedCardStack({
           hitTestPickCardId(
             event.clientX,
             event.clientY,
-            SAVED_STACK_ID,
+            stackId,
           ),
         );
         state.captured = true;
@@ -293,7 +393,7 @@ function SavedCardStack({
       hitTestPickCardId(
         event.clientX,
         event.clientY,
-        SAVED_STACK_ID,
+        stackId,
       ),
     );
   }
@@ -331,7 +431,7 @@ function SavedCardStack({
     const cardId = hitTestPickCardId(
       event.clientX,
       event.clientY,
-      SAVED_STACK_ID,
+      stackId,
     );
 
     setScrubbingStack(false);
@@ -356,21 +456,40 @@ function SavedCardStack({
 
   return (
     <div
-      className="relative mt-2 h-[168px] touch-pan-y"
+      ref={rowRef}
+      className="relative ml-auto h-[168px] touch-pan-y overflow-visible"
+      style={{ width: maxStackWidth }}
       onMouseEnter={() =>
         setHoveredStack(true)
       }
-      onMouseLeave={() =>
-        setHoveredStack(false)
-      }
+      onMouseLeave={() => {
+        setHoveredStack(false);
+        setHoveredCardId(null);
+      }}
+      onMouseMove={(event) => {
+        updateHoveredCardFromPointer(
+          event.clientX,
+        );
+      }}
       onPointerDown={onStackPointerDown}
-      onPointerMove={onStackPointerMove}
+      onPointerMove={(event) => {
+        onStackPointerMove(event);
+
+        if (
+          !isCoarsePointer(event) &&
+          !scrubbingStack
+        ) {
+          updateHoveredCardFromPointer(
+            event.clientX,
+          );
+        }
+      }}
       onPointerUp={onStackPointerUp}
       onPointerCancel={
         onStackPointerCancel
       }
     >
-      {visibleWorks.map((work, index) => {
+      {works.map((work, index) => {
         const thumbnail =
           getWorkThumbnail(work);
 
@@ -381,42 +500,37 @@ function SavedCardStack({
           return null;
         }
 
-        const right =
-          hiddenCount > 0
-            ? (visibleWorks.length - index) *
-              gap
-            : (visibleWorks.length -
-                1 -
-                index) *
-              gap;
+        const right = getCardRightOffset(
+          index,
+          works.length,
+          gap,
+        );
 
         const isScrubActive =
           scrubWorkId === work.id;
-
-        const sourceLabel =
-          getSourceLabel(
-            work,
-            sourceLabels,
-          );
+        const isHovered =
+          hoveredCardId === work.id;
+        const isRaised =
+          isScrubActive || isHovered;
 
         return (
           <div
             key={work.id}
             data-pick-card-id={work.id}
-            data-pick-stack={SAVED_STACK_ID}
-            className={`group/card absolute top-0 h-[156px] w-[108px] overflow-hidden rounded-xl border-2 border-[#262626] bg-[#141414] shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-all duration-300 ease-out hover:-translate-y-2 ${
-              isScrubActive
-                ? "-translate-y-2 scale-[1.03] shadow-[0_12px_28px_rgba(0,0,0,0.55)]"
-                : ""
+            data-pick-stack={stackId}
+            className={`group/card absolute top-0 h-[156px] w-[108px] overflow-visible rounded-xl border-2 bg-[#141414] shadow-[0_8px_24px_rgba(0,0,0,0.45)] ease-out ${
+              isRaised
+                ? "pointer-events-auto border-zinc-300/90 shadow-[0_14px_32px_rgba(0,0,0,0.62)]"
+                : "pointer-events-none border-[#262626]"
             }`}
             style={{
               right: `${right}px`,
-              zIndex:
-                isScrubActive
-                  ? visibleWorks.length + 10
-                  : visibleWorks.length -
-                    index +
-                    2,
+              zIndex: isRaised
+                ? HOVERED_CARD_Z_INDEX
+                : works.length -
+                  index +
+                  2,
+              transition: `right ${STACK_TRANSITION_MS}ms ease-out, box-shadow ${STACK_TRANSITION_MS}ms ease-out, border-color ${STACK_TRANSITION_MS}ms ease-out`,
             }}
           >
             <button
@@ -434,7 +548,7 @@ function SavedCardStack({
 
                 onWorkClick(work);
               }}
-              className="absolute inset-0 text-left"
+              className="absolute inset-0 overflow-hidden rounded-[10px] text-left"
               aria-label={
                 work.artistName
                   ? `Open ${work.artistName} clip`
@@ -454,16 +568,6 @@ function SavedCardStack({
                 </div>
               )}
 
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-2 pb-2 pt-8">
-                {work.artistName && (
-                  <p className="truncate text-[10px] font-medium text-white">
-                    {work.artistName}
-                  </p>
-                )}
-                <p className="truncate text-[9px] uppercase tracking-wide text-white/55">
-                  {sourceLabel}
-                </p>
-              </div>
             </button>
 
             <button
@@ -485,18 +589,38 @@ function SavedCardStack({
           </div>
         );
       })}
+    </div>
+  );
+}
 
-      {hiddenCount > 0 && (
-        <div
-          className="absolute top-0 flex h-[156px] w-[108px] items-center justify-end rounded-xl border-2 border-[#262626] bg-[#0a0a0a] pr-3 text-base font-black text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-all duration-300"
-          style={{
-            right: "0px",
-            zIndex: 1,
-          }}
-        >
-          +{hiddenCount}
-        </div>
-      )}
+type SavedCardStackProps = {
+  works: SavedPanelWork[];
+  onWorkClick: (
+    work: SavedPanelWork,
+  ) => void;
+  onUnsave: (
+    work: SavedPanelWork,
+  ) => void;
+};
+
+function SavedCardStack({
+  works,
+  onWorkClick,
+  onUnsave,
+}: SavedCardStackProps) {
+  const rows = chunkWorksIntoRows(works);
+
+  return (
+    <div className="space-y-4 overflow-visible">
+      {rows.map((rowWorks, rowIndex) => (
+        <SavedCardStackRow
+          key={`${rowWorks[0]?.id ?? "row"}-${rowIndex}`}
+          works={rowWorks}
+          stackId={`${SAVED_STACK_ID}-${rowIndex}`}
+          onWorkClick={onWorkClick}
+          onUnsave={onUnsave}
+        />
+      ))}
     </div>
   );
 }
@@ -535,15 +659,8 @@ export default function SavedPanel({
     showAdded,
     setShowAdded,
   ] = useState(false);
-
-  const sourceLabels = useMemo(
-    () => ({
-      youtube: t("sourceYoutube"),
-      tiktok: t("sourceTiktok"),
-      image: t("sourceImage"),
-    }),
-    [t],
-  );
+  const [savedFilter, setSavedFilter] =
+    useState<"today" | "all">("all");
 
   const loadSaved = useCallback(async () => {
     setLoading(true);
@@ -613,7 +730,10 @@ export default function SavedPanel({
           : pickRow.work;
 
         return workRow
-          ? mapPickedWork(workRow)
+          ? mapPickedWork(
+              workRow,
+              pickRow.created_at,
+            )
           : null;
       })
       .filter(
@@ -663,16 +783,23 @@ export default function SavedPanel({
   function panelBody(
     compact = false,
   ) {
+    const filteredItems =
+      savedFilter === "today"
+        ? items.filter((item) =>
+            isToday(item.pickedAt),
+          )
+        : items;
+
     return (
       <>
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-white">
-              {t("saved")}
+              {t("myPicks")}
             </h2>
             <p className="mt-0.5 text-xs text-zinc-500">
-              {items.length}{" "}
-              {t("savedState").toLowerCase()}
+              {filteredItems.length}{" "}
+              {t("picked")}
             </p>
           </div>
 
@@ -682,13 +809,47 @@ export default function SavedPanel({
           >
             {compact
               ? "→"
-              : `${t("saved")} →`}
+              : `${t("all")} →`}
           </Link>
         </div>
 
-        <div className="mt-5">
+        <div className="mt-4 flex items-center gap-3 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() =>
+              setSavedFilter("today")
+            }
+            className={
+              savedFilter === "today"
+                ? "text-violet-400"
+                : "text-zinc-500 transition hover:text-zinc-300"
+            }
+          >
+            Today
+          </button>
+
+          <span className="text-zinc-700">
+            |
+          </span>
+
+          <button
+            type="button"
+            onClick={() =>
+              setSavedFilter("all")
+            }
+            className={
+              savedFilter === "all"
+                ? "text-violet-400"
+                : "text-zinc-500 transition hover:text-zinc-300"
+            }
+          >
+            All
+          </button>
+        </div>
+
+        <div className="mt-5 overflow-visible">
           {loading ? (
-            <div className="relative h-[168px]">
+            <div className="relative ml-auto h-[168px] w-[108px] overflow-visible">
               <div className="absolute right-0 top-0 h-[156px] w-[108px] animate-pulse rounded-xl bg-[#181818]" />
               <div className="absolute right-[21px] top-0 h-[156px] w-[108px] animate-pulse rounded-xl bg-[#141414]" />
               <div className="absolute right-[42px] top-0 h-[156px] w-[108px] animate-pulse rounded-xl bg-[#101010]" />
@@ -703,16 +864,17 @@ export default function SavedPanel({
             >
               {t("login")}
             </button>
-          ) : items.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              {t("noSaved")}
+              {savedFilter === "today"
+                ? "Nothing picked today."
+                : t("noSaved")}
             </p>
           ) : (
             <SavedCardStack
-              works={items}
+              works={filteredItems}
               onWorkClick={onWorkClick}
               onUnsave={onUnsave}
-              sourceLabels={sourceLabels}
             />
           )}
         </div>
@@ -765,7 +927,7 @@ export default function SavedPanel({
                   strokeWidth={1.2}
                 />
                 <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
-                  {t("saved")}
+                  {t("myPicks")}
                 </span>
               </>
             )}
@@ -778,7 +940,7 @@ export default function SavedPanel({
           )}
 
           <div
-            className={`h-full overflow-y-auto pb-8 pl-10 pr-4 pt-6 transition-opacity duration-150 ${
+            className={`h-full overflow-x-visible overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pb-8 pl-10 pr-4 pt-6 transition-opacity duration-150 ${
               open
                 ? "opacity-100"
                 : "pointer-events-none opacity-0"
@@ -806,7 +968,7 @@ export default function SavedPanel({
             }`}
           >
             <span className="text-[10px] font-bold uppercase tracking-[0.14em] [writing-mode:vertical-rl]">
-              {t("saved")}
+              {t("myPicks")}
             </span>
             {showAdded && (
               <span className="pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 animate-[pickPulse_0.75s_ease-out_forwards] text-xs font-bold text-violet-400">
@@ -835,7 +997,7 @@ export default function SavedPanel({
           >
             <div className="flex items-center justify-between border-b border-[#262626] px-4 py-3">
               <span className="text-sm font-semibold text-white">
-                {t("saved")}
+                {t("myPicks")}
               </span>
               <button
                 type="button"
@@ -849,7 +1011,7 @@ export default function SavedPanel({
               </button>
             </div>
 
-            <div className="overflow-y-auto px-4 py-4">
+            <div className="overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-4 py-4">
               {panelBody(true)}
             </div>
           </div>

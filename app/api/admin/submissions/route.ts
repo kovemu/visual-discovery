@@ -5,11 +5,27 @@ import {
   adminAuthErrorResponse,
   requireAdmin,
 } from "@/lib/auth/requireAdmin";
+import { parseYouTubeVideoId } from "@/lib/submissions/parseSubmissionUrl";
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+function youtubeThumbnailUrl(
+  sourceId: string | null | undefined,
+  sourceUrl: string,
+) {
+  if (sourceId) {
+    return `https://i.ytimg.com/vi/${sourceId}/hqdefault.jpg`;
+  }
+
+  const videoId = parseYouTubeVideoId(sourceUrl);
+
+  return videoId
+    ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+    : null;
+}
 
 export async function GET() {
   const auth = await requireAdmin();
@@ -45,7 +61,7 @@ export async function GET() {
       await supabaseAdmin
         .from("clip_submissions")
         .select(
-          "id, user_id, source_url, source_type, status, created_at",
+          "id, user_id, source_url, source_type, source_id, title, thumbnail_url, status, created_at",
         )
         .eq("status", "pending")
         .order("created_at", {
@@ -67,8 +83,60 @@ export async function GET() {
       );
     }
 
+    const rows = data ?? [];
+    const submitterIds = [
+      ...new Set(
+        rows
+          .map((row) => row.user_id)
+          .filter(
+            (value): value is string =>
+              typeof value === "string" &&
+              value.length > 0,
+          ),
+      ),
+    ];
+
+    const submitterEmails = new Map<
+      string,
+      string
+    >();
+
+    await Promise.all(
+      submitterIds.map(async (userId) => {
+        const { data: userData } =
+          await supabaseAdmin.auth.admin.getUserById(
+            userId,
+          );
+
+        submitterEmails.set(
+          userId,
+          userData.user?.email ?? userId,
+        );
+      }),
+    );
+
     return NextResponse.json({
-      submissions: data ?? [],
+      submissions: rows.map((row) => {
+        const thumbnail =
+          row.thumbnail_url ||
+          (row.source_type === "youtube"
+            ? youtubeThumbnailUrl(
+                row.source_id,
+                row.source_url,
+              )
+            : null);
+
+        return {
+          ...row,
+          thumbnail_url: thumbnail,
+          submitter:
+            row.user_id
+              ? submitterEmails.get(
+                  row.user_id,
+                ) ?? row.user_id
+              : null,
+        };
+      }),
     });
   } catch (error) {
     console.error(

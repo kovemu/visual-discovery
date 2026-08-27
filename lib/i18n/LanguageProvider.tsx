@@ -4,17 +4,16 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
 } from "react";
 
 import {
-  LOCALE_STORAGE_KEY,
   translations,
   type Locale,
   type TranslationKey,
 } from "@/lib/i18n/translations";
+
+const EN_LOCALE: Locale = "en";
 
 type LanguageContextValue = {
   locale: Locale;
@@ -27,77 +26,27 @@ const LanguageContext =
     null,
   );
 
-function detectInitialLocale(): Locale {
-  if (typeof window === "undefined") {
-    return "en";
-  }
-
-  try {
-    const stored = localStorage.getItem(
-      LOCALE_STORAGE_KEY,
-    );
-
-    if (stored === "ko" || stored === "en") {
-      return stored;
-    }
-  } catch {
-    // ignore
-  }
-
-  return navigator.language.startsWith("ko")
-    ? "ko"
-    : "en";
-}
-
 export function LanguageProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [locale, setLocaleState] =
-    useState<Locale>("en");
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    setLocaleState(detectInitialLocale());
-    setReady(true);
-  }, []);
-
   const setLocale = useCallback(
-    (next: Locale) => {
-      setLocaleState(next);
-
-      try {
-        localStorage.setItem(
-          LOCALE_STORAGE_KEY,
-          next,
-        );
-      } catch {
-        // ignore
-      }
+    (_next: Locale) => {
+      // English-only public UI.
     },
     [],
   );
 
   const value = useMemo(
     () => ({
-      locale,
+      locale: EN_LOCALE,
       setLocale,
       t: (key: TranslationKey) =>
-        translations[locale][key],
+        translations.en[key],
     }),
-    [locale, setLocale],
+    [setLocale],
   );
-
-  if (!ready) {
-    return (
-      <LanguageContext.Provider
-        value={value}
-      >
-        {children}
-      </LanguageContext.Provider>
-    );
-  }
 
   return (
     <LanguageContext.Provider value={value}>

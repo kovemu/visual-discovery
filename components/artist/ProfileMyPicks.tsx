@@ -9,6 +9,7 @@ import {
 
 import MyPicksPanel from "@/components/discover/MyPicksPanel";
 import { createClient } from "@/lib/supabase/client";
+import { insertWorkPick } from "@/lib/picks/insertWorkPick";
 
 type ProfilePickWork = {
   id: string;
@@ -357,18 +358,14 @@ export default function ProfileMyPicks() {
     }
 
     const { error } =
-      await supabase
-        .from("work_picks")
-        .insert({
-          user_id:
-            user.id,
-
-          work_id:
-            workId,
-
-          artist_id:
-            work.artistId,
-        });
+      await insertWorkPick(
+        supabase,
+        {
+          userId: user.id,
+          workId,
+          artistId: work.artistId,
+        },
+      );
 
     if (error) {
       console.error(

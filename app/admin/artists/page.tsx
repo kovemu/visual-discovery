@@ -50,9 +50,6 @@ function getCategoryBadgeStyle(
     case "cheer":
       return "bg-blue-50 text-blue-700 ring-blue-100";
 
-    case "cos":
-      return "bg-pink-50 text-pink-700 ring-pink-100";
-
     case "look":
       return "bg-orange-50 text-orange-700 ring-orange-100";
 
@@ -83,9 +80,6 @@ function getCategoryFilterStyle(
 
     case "cheer":
       return "border-blue-200 bg-blue-50 text-blue-700";
-
-    case "cos":
-      return "border-pink-200 bg-pink-50 text-pink-700";
 
     case "look":
       return "border-orange-200 bg-orange-50 text-orange-700";
@@ -195,12 +189,20 @@ export default async function AdminArtistsPage({
               </p>
             </div>
 
-            <Link
-              href="/admin/import"
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-zinc-950 px-5 text-sm font-medium text-white transition hover:bg-zinc-800"
-            >
-              YouTube Importer
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href="/admin/submissions"
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 text-sm font-medium text-zinc-900 transition hover:border-zinc-400 hover:bg-zinc-50"
+              >
+                Clip Submissions
+              </Link>
+              <Link
+                href="/admin/import"
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-zinc-950 px-5 text-sm font-medium text-white transition hover:bg-zinc-800"
+              >
+                YouTube Importer
+              </Link>
+            </div>
           </div>
         </section>
 

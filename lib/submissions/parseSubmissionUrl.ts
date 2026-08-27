@@ -10,6 +10,7 @@ export type SubmissionSourceType =
 export type ParsedSubmissionUrl = {
   source_type: SubmissionSourceType;
   source_url: string;
+  source_id: string;
 };
 
 const YOUTUBE_VIDEO_ID =
@@ -24,7 +25,7 @@ function normalizeYouTubeHost(
     .replace(/^m\./, "");
 }
 
-function parseYouTubeVideoId(
+export function parseYouTubeVideoId(
   input: string,
 ): string | null {
   const trimmed = input.trim();
@@ -107,6 +108,7 @@ export function parseSubmissionUrl(
     return {
       source_type: "tiktok",
       source_url: tiktokCanonical,
+      source_id: tiktokVideoId,
     };
   }
 
@@ -117,6 +119,7 @@ export function parseSubmissionUrl(
     return {
       source_type: "youtube",
       source_url: `https://www.youtube.com/watch?v=${youtubeVideoId}`,
+      source_id: youtubeVideoId,
     };
   }
 

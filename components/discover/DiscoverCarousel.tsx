@@ -16,7 +16,6 @@ import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import {
   formatDurationSeconds,
   getWorkThumbnail,
-  isPlayableVideo,
 } from "@/lib/works/workDisplay";
 
 const CAROUSEL_GAP = 12;
@@ -43,7 +42,7 @@ function getVisibleCardTarget(
   trackWidth: number,
 ): number {
   if (trackWidth < 480) {
-    return 1.6;
+    return 2.2;
   }
 
   if (trackWidth < 768) {
@@ -529,7 +528,6 @@ export default function DiscoverCarousel({
   }
 
   function renderCard(work: FeedItem, feedIndex: number) {
-    const isPlayable = isPlayableVideo(work);
     const thumbnail = getWorkThumbnail(work);
 
     return (
@@ -568,9 +566,9 @@ export default function DiscoverCarousel({
             <img
               src={thumbnail}
               alt={
-                isPlayable
-                  ? `${work.artistName} video`
-                  : `${work.artistName} work`
+                work.artistName
+                  ? `${work.artistName} work`
+                  : "Discover work"
               }
               draggable={false}
               referrerPolicy={
@@ -583,12 +581,6 @@ export default function DiscoverCarousel({
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-white/30">
               No thumbnail
-            </div>
-          )}
-
-          {isPlayable && (
-            <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-[10px] text-white/90 backdrop-blur-[2px] md:h-8 md:w-8 md:text-[11px]">
-              ▶
             </div>
           )}
 

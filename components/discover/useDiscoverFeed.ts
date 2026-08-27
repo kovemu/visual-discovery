@@ -112,6 +112,8 @@ async function fetchCategoryBatch(
 
   round: number,
 
+  searchQuery: string,
+
 ) {
 
   const params = new URLSearchParams({
@@ -125,6 +127,14 @@ async function fetchCategoryBatch(
   if (categorySignature !== "all") {
 
     params.set("categories", categorySignature);
+
+  }
+
+
+
+  if (searchQuery) {
+
+    params.set("q", searchQuery);
 
   }
 
@@ -156,7 +166,15 @@ export function useDiscoverFeed(
 
   categorySignature: string,
 
+  pickedWorkIds: Set<string>,
+
+  picksReady: boolean,
+
+  searchQuery = "",
+
 ) {
+
+  const normalizedSearch = searchQuery.trim();
 
   const [works, setWorks] = useState<FeedItem[]>(
 
@@ -192,9 +210,13 @@ export function useDiscoverFeed(
 
   const emptyPageStreakRef = useRef(0);
 
+  const pickedWorkIdsRef = useRef(pickedWorkIds);
+
 
 
   worksRef.current = works;
+
+  pickedWorkIdsRef.current = pickedWorkIds;
 
 
 
@@ -236,6 +258,8 @@ export function useDiscoverFeed(
 
       generation: number,
 
+      queryToLoad: string,
+
     ) => {
 
       const categories =
@@ -271,6 +295,8 @@ export function useDiscoverFeed(
           signatureToLoad,
 
           roundRef.current,
+
+          queryToLoad,
 
         );
 
@@ -315,6 +341,8 @@ export function useDiscoverFeed(
                 categories,
 
               ) &&
+
+              !pickedWorkIdsRef.current.has(work.id) &&
 
               !seenIdsRef.current.has(work.id) &&
 
@@ -380,6 +408,14 @@ export function useDiscoverFeed(
 
   useEffect(() => {
 
+    if (!picksReady) {
+
+      return;
+
+    }
+
+
+
     const generation = generationRef.current + 1;
 
     generationRef.current = generation;
@@ -413,6 +449,8 @@ export function useDiscoverFeed(
           INITIAL_FEED_SIZE,
 
           generation,
+
+          normalizedSearch,
 
         );
 
@@ -452,7 +490,7 @@ export function useDiscoverFeed(
 
     })();
 
-  }, [categorySignature, collectBatch]);
+  }, [categorySignature, collectBatch, normalizedSearch, picksReady]);
 
 
 
@@ -489,6 +527,8 @@ export function useDiscoverFeed(
         APPEND_BATCH_SIZE,
 
         generation,
+
+        normalizedSearch,
 
       );
 
@@ -560,7 +600,29 @@ export function useDiscoverFeed(
 
     }
 
-  }, [categorySignature, collectBatch, isLoading]);
+  }, [categorySignature, collectBatch, isLoading, normalizedSearch]);
+
+
+
+  const removePickedWork = useCallback(
+
+    (workId: string) => {
+
+      setWorks((current) =>
+
+        current.filter(
+
+          (work) => work.id !== workId,
+
+        ),
+
+      );
+
+    },
+
+    [],
+
+  );
 
 
 
@@ -611,6 +673,8 @@ export function useDiscoverFeed(
     appendNextBatch,
 
     prune,
+
+    removePickedWork,
 
   };
 

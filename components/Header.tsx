@@ -12,8 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
-  const { locale, setLocale, t } =
-    useTranslation();
+  const { t } = useTranslation();
   const supabase = useMemo(
     () => createClient(),
     [],
@@ -86,49 +85,15 @@ export default function Header() {
 
   return (
     <header className="border-b border-[#262626] bg-[#050505]">
-      <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-3 md:h-16 md:flex-row md:items-center md:justify-between md:gap-4 md:px-6 md:py-0 lg:px-10">
-        <div className="flex items-center justify-between gap-3">
-          <Link
-            href="/"
-            className="shrink-0 text-lg font-black tracking-tight text-white"
-          >
-            Visual
-          </Link>
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:h-16 md:px-6 md:py-0 lg:px-10">
+        <Link
+          href="/"
+          className="shrink-0 text-lg font-black tracking-tight text-white"
+        >
+          Visual
+        </Link>
 
-          <div className="flex items-center gap-2 md:hidden">
-            <button
-              type="button"
-              onClick={() =>
-                setLocale("ko")
-              }
-              className={`text-xs font-semibold ${
-                locale === "ko"
-                  ? "text-white"
-                  : "text-zinc-500"
-              }`}
-            >
-              한국어
-            </button>
-            <span className="text-zinc-700">
-              |
-            </span>
-            <button
-              type="button"
-              onClick={() =>
-                setLocale("en")
-              }
-              className={`text-xs font-semibold ${
-                locale === "en"
-                  ? "text-white"
-                  : "text-zinc-500"
-              }`}
-            >
-              EN
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 md:justify-end md:gap-5">
+        <div className="flex items-center gap-3 md:gap-5">
           <nav className="flex items-center gap-3 md:gap-5">
             <Link
               href="/"
@@ -142,49 +107,9 @@ export default function Header() {
                 "/saved",
               )}
             >
-              {t("saved")}
-            </Link>
-            <Link
-              href="/submit"
-              className={navLinkClass(
-                "/submit",
-              )}
-            >
-              {t("submit")}
+              {t("myPicks")}
             </Link>
           </nav>
-
-          <div className="hidden items-center gap-2 md:flex">
-            <button
-              type="button"
-              onClick={() =>
-                setLocale("ko")
-              }
-              className={`text-xs font-semibold ${
-                locale === "ko"
-                  ? "text-white"
-                  : "text-zinc-500"
-              }`}
-            >
-              한국어
-            </button>
-            <span className="text-zinc-700">
-              |
-            </span>
-            <button
-              type="button"
-              onClick={() =>
-                setLocale("en")
-              }
-              className={`text-xs font-semibold ${
-                locale === "en"
-                  ? "text-white"
-                  : "text-zinc-500"
-              }`}
-            >
-              EN
-            </button>
-          </div>
 
           {!authLoading &&
             (userEmail ? (

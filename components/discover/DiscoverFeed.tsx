@@ -14,6 +14,7 @@ import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { getAnalyticsSource } from "@/lib/works/workDisplay";
 import { createClient } from "@/lib/supabase/client";
+import { insertWorkPick } from "@/lib/picks/insertWorkPick";
 import {
   CREATOR_CATEGORY_OPTIONS,
   type CreatorCategory,
@@ -28,8 +29,8 @@ import {
 
 export type FeedItem = {
   id: string;
-  artistId: string;
-  artistName: string;
+  artistId?: string;
+  artistName?: string;
   category: string;
   artistTags?: string[];
   type?: "image" | "youtube" | "tiktok";
@@ -37,6 +38,8 @@ export type FeedItem = {
   image?: string;
   videoId?: string;
   caption?: string | null;
+  title?: string | null;
+  description?: string | null;
   sourceUrl?: string;
   artistUrl?: string;
   durationSeconds?: number;
@@ -45,6 +48,8 @@ export type FeedItem = {
 type DiscoverFeedProps = {
   works: FeedItem[];
 };
+
+const DISCOVER_SEARCH_DEBOUNCE_MS = 300;
 
 export default function DiscoverFeed({
   works: _initialWorks,
@@ -72,7 +77,34 @@ export default function DiscoverFeed({
     selectedCategories,
   );
 
-  const feed = useDiscoverFeed(categorySignature);
+  const [pickedWorkIds, setPickedWorkIds] =
+    useState<Set<string>>(new Set());
+  const [picksLoaded, setPicksLoaded] =
+    useState(false);
+
+  const [searchInput, setSearchInput] =
+    useState("");
+  const [
+    debouncedSearch,
+    setDebouncedSearch,
+  ] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(searchInput.trim());
+    }, DISCOVER_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [searchInput]);
+
+  const feed = useDiscoverFeed(
+    categorySignature,
+    pickedWorkIds,
+    picksLoaded,
+    debouncedSearch,
+  );
 
   const categoryButtonClass = (isActive: boolean) =>
     `rounded-sm border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition md:px-3 md:py-1.5 md:text-xs ${
@@ -94,8 +126,6 @@ export default function DiscoverFeed({
     useState<string | null>(null);
   const [selectedWork, setSelectedWork] =
     useState<FeedItem | null>(null);
-  const [pickedWorkIds, setPickedWorkIds] =
-    useState<Set<string>>(new Set());
 
   useEffect(() => {
     async function loadPicks() {
@@ -106,6 +136,7 @@ export default function DiscoverFeed({
       if (!user) {
         setCurrentUserId(null);
         setPickedWorkIds(new Set());
+        setPicksLoaded(true);
         return;
       }
 
@@ -118,6 +149,7 @@ export default function DiscoverFeed({
 
       if (error) {
         console.error("LOAD PICKS ERROR:", error);
+        setPicksLoaded(true);
         return;
       }
 
@@ -128,6 +160,7 @@ export default function DiscoverFeed({
           ),
         ),
       );
+      setPicksLoaded(true);
     }
 
     void loadPicks();
@@ -226,10 +259,10 @@ export default function DiscoverFeed({
       return next;
     });
 
-    const { error } = await supabase.from("work_picks").insert({
-      user_id: userId,
-      work_id: work.id,
-      artist_id: work.artistId,
+    const { error } = await insertWorkPick(supabase, {
+      userId,
+      workId: work.id,
+      artistId: work.artistId,
     });
 
     if (error) {
@@ -251,6 +284,8 @@ export default function DiscoverFeed({
       },
     });
     setPickPanelRefreshKey((current) => current + 1);
+    feed.removePickedWork(work.id);
+    void feed.appendNextBatch();
   }
 
   function savedPanelWorkToFeedItem(
@@ -265,6 +300,8 @@ export default function DiscoverFeed({
       source: work.source,
       image: work.image,
       videoId: work.videoId,
+      title: work.title,
+      description: work.description,
       caption: work.caption,
       sourceUrl: work.sourceUrl,
     };
@@ -344,10 +381,23 @@ export default function DiscoverFeed({
               </button>
             );
           })}
+
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(event) =>
+              setSearchInput(
+                event.target.value,
+              )
+            }
+            placeholder="Search clips"
+            aria-label="Search clips"
+            className="h-8 min-w-[140px] flex-1 rounded-sm border border-white/15 bg-white/5 px-2.5 text-xs text-white outline-none transition placeholder:text-white/35 focus:border-white/30 sm:max-w-[200px] sm:flex-none"
+          />
         </div>
 
         <DiscoverCarousel
-          key={categorySignature}
+          key={`${categorySignature}:${debouncedSearch}`}
           works={feed.works}
           pickedWorkIds={pickedWorkIds}
           isLoading={feed.isLoading}
@@ -375,15 +425,6 @@ export default function DiscoverFeed({
           isSaved={pickedWorkIds.has(selectedWork.id)}
           onClose={requestCloseWorkModal}
           onToggleSave={() => void togglePick(selectedWork)}
-          onOriginalClick={() =>
-            trackProductEvent({
-              event_name: "original_click",
-              work_id: selectedWork.id,
-              metadata: {
-                source: getAnalyticsSource(selectedWork),
-              },
-            })
-          }
         />
       )}
 

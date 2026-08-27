@@ -1,7 +1,6 @@
 export const CREATOR_CATEGORIES = [
   "kpop",
   "cheer",
-  "cos",
   "look",
 ] as const;
 
@@ -17,7 +16,6 @@ export const CREATOR_CATEGORY_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "kpop", label: "KPOP" },
   { value: "cheer", label: "CHEER" },
-  { value: "cos", label: "COS" },
   { value: "look", label: "LOOK" },
 ];
 
@@ -46,6 +44,10 @@ export function formatCreatorCategoryLabel(
 
   if (!category) {
     return "Unknown";
+  }
+
+  if (category === "cos") {
+    return "COS";
   }
 
   return (

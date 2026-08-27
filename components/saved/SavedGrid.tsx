@@ -4,20 +4,50 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import WorkMediaModal from "@/components/works/WorkMediaModal";
+import ImportClipForm from "@/components/saved/ImportClipForm";
 import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 import {
   getAnalyticsSource,
-  getSourceLabel,
   getWorkThumbnail,
-  isPlayableVideo,
   type WorkMediaItem,
 } from "@/lib/works/workDisplay";
+
+const DRAG_ACTIVATION_DISTANCE_PX = 8;
+const SAVED_GRID_CLASS =
+  "grid grid-cols-3 gap-1.5 sm:grid-cols-[repeat(auto-fill,150px)] sm:gap-2";
+const SAVED_CARD_MEDIA_CLASS =
+  "aspect-[9/16] w-full sm:aspect-auto sm:h-[260px]";
+const SAVED_CARD_BUTTON_CLASS =
+  "group w-full sm:w-[150px] text-left";
+const SAVED_SKELETON_CLASS =
+  "aspect-[9/16] w-full animate-pulse rounded-2xl bg-[#181818] sm:aspect-auto sm:h-[260px] sm:w-[150px]";
 
 type PickedWorkRow = {
   id: number | string;
@@ -41,13 +71,64 @@ type PickedWorkRow = {
 
 type PickRow = {
   work_id: number | string;
-  artist_id: string;
+  artist_id: string | null;
   created_at: string;
+  sort_order: number | string | null;
   work:
     | PickedWorkRow
     | PickedWorkRow[]
     | null;
 };
+
+function asSortOrder(
+  value: unknown,
+): number | null {
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value)
+  ) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function compareSavedPickRows(
+  left: PickRow,
+  right: PickRow,
+) {
+  const leftOrder = asSortOrder(left.sort_order);
+  const rightOrder = asSortOrder(right.sort_order);
+
+  if (
+    leftOrder !== null &&
+    rightOrder !== null &&
+    leftOrder !== rightOrder
+  ) {
+    return leftOrder - rightOrder;
+  }
+
+  if (leftOrder !== null && rightOrder === null) {
+    return -1;
+  }
+
+  if (leftOrder === null && rightOrder !== null) {
+    return 1;
+  }
+
+  return (
+    new Date(right.created_at).getTime() -
+    new Date(left.created_at).getTime()
+  );
+}
 
 function mapPickedWork(
   work: PickedWorkRow,
@@ -55,10 +136,6 @@ function mapPickedWork(
   const artist = Array.isArray(work.artist)
     ? work.artist[0]
     : work.artist;
-
-  if (!artist) {
-    return null;
-  }
 
   const isYoutube =
     work.source === "youtube" &&
@@ -69,8 +146,8 @@ function mapPickedWork(
 
   return {
     id: String(work.id),
-    artistId: artist.id,
-    artistName: artist.name,
+    artistId: artist?.id ?? "",
+    artistName: artist?.name ?? "",
     source: work.source,
     type: isYoutube
       ? "youtube"
@@ -87,7 +164,78 @@ function mapPickedWork(
         ? undefined
         : work.source_url),
     sourceUrl: work.source_url,
+    title: work.title,
+    description: work.description,
+    caption:
+      work.description ??
+      work.title ??
+      null,
   };
+}
+
+function SavedCardFace({
+  work,
+}: {
+  work: WorkMediaItem;
+}) {
+  const thumbnail = getWorkThumbnail(work);
+
+  return (
+    <article className="relative overflow-hidden rounded-2xl bg-neutral-950">
+      <div className={SAVED_CARD_MEDIA_CLASS}>
+        {thumbnail ? (
+          <img
+            src={thumbnail}
+            alt=""
+            draggable={false}
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-sm text-white/30">
+            —
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function SortableSavedCard({
+  work,
+  onOpen,
+}: {
+  work: WorkMediaItem;
+  onOpen: (work: WorkMediaItem) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: work.id,
+  });
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={() => onOpen(work)}
+      className={SAVED_CARD_BUTTON_CLASS}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.35 : 1,
+        zIndex: isDragging ? 1 : undefined,
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <SavedCardFace work={work} />
+    </button>
+  );
 }
 
 export default function SavedGrid() {
@@ -107,6 +255,37 @@ export default function SavedGrid() {
     setSelectedWork,
   ] = useState<WorkMediaItem | null>(
     null,
+  );
+  const [
+    activeWork,
+    setActiveWork,
+  ] = useState<WorkMediaItem | null>(
+    null,
+  );
+
+  const suppressClickRef = useRef(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: DRAG_ACTIVATION_DISTANCE_PX,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250,
+        tolerance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter:
+        sortableKeyboardCoordinates,
+    }),
+  );
+
+  const workIds = useMemo(
+    () => works.map((work) => work.id),
+    [works],
   );
 
   const loadSaved = useCallback(async () => {
@@ -128,6 +307,7 @@ export default function SavedGrid() {
             work_id,
             artist_id,
             created_at,
+            sort_order,
             work:works (
               id,
               source,
@@ -144,6 +324,10 @@ export default function SavedGrid() {
           `,
         )
         .eq("user_id", user.id)
+        .order("sort_order", {
+          ascending: true,
+          nullsFirst: false,
+        })
         .order("created_at", {
           ascending: false,
         });
@@ -158,10 +342,10 @@ export default function SavedGrid() {
       return;
     }
 
-    const mapped = (data ?? [])
-      .map((row) => {
-        const pickRow = row as PickRow;
-
+    const mapped = ((data ?? []) as PickRow[])
+      .slice()
+      .sort(compareSavedPickRows)
+      .map((pickRow) => {
         if (!pickRow.work) {
           return null;
         }
@@ -190,6 +374,103 @@ export default function SavedGrid() {
   useEffect(() => {
     void loadSaved();
   }, [loadSaved]);
+
+  async function persistSavedOrder(
+    orderedWorks: WorkMediaItem[],
+  ) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { error: new Error("Not signed in.") };
+    }
+
+    const results = await Promise.all(
+      orderedWorks.map((work, index) =>
+        supabase
+          .from("work_picks")
+          .update({
+            sort_order: index,
+          })
+          .eq("user_id", user.id)
+          .eq("work_id", work.id),
+      ),
+    );
+
+    const failed = results.find(
+      (result) => result.error,
+    );
+
+    return {
+      error: failed?.error ?? null,
+    };
+  }
+
+  function handleDragStart(
+    event: DragStartEvent,
+  ) {
+    suppressClickRef.current = true;
+    const current = works.find(
+      (work) => work.id === String(event.active.id),
+    );
+    setActiveWork(current ?? null);
+  }
+
+  function releaseClickSuppression() {
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 50);
+  }
+
+  async function handleDragEnd(
+    event: DragEndEvent,
+  ) {
+    setActiveWork(null);
+    releaseClickSuppression();
+
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const previousWorks = works;
+    const oldIndex = previousWorks.findIndex(
+      (work) => work.id === String(active.id),
+    );
+    const newIndex = previousWorks.findIndex(
+      (work) => work.id === String(over.id),
+    );
+
+    if (oldIndex < 0 || newIndex < 0) {
+      return;
+    }
+
+    const nextWorks = arrayMove(
+      previousWorks,
+      oldIndex,
+      newIndex,
+    );
+
+    setWorks(nextWorks);
+
+    const { error } =
+      await persistSavedOrder(nextWorks);
+
+    if (error) {
+      console.error(
+        "SAVE SAVED ORDER ERROR:",
+        error,
+      );
+      setWorks(previousWorks);
+    }
+  }
+
+  function handleDragCancel() {
+    setActiveWork(null);
+    releaseClickSuppression();
+  }
 
   async function handleUnsave(
     work: WorkMediaItem,
@@ -242,6 +523,11 @@ export default function SavedGrid() {
   }
 
   function openWork(work: WorkMediaItem) {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+
     setSelectedWork(work);
 
     trackProductEvent({
@@ -257,88 +543,72 @@ export default function SavedGrid() {
 
   if (loading) {
     return (
-<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">        {Array.from({ length: 6 }).map(
-          (_, index) => (
-            <div
-              key={index}
-              className="aspect-[3/4] animate-pulse rounded-2xl bg-[#181818]"
-            />
-          ),
-        )}
-      </div>
-    );
-  }
-
-  if (works.length === 0) {
-    return (
-      <p className="text-sm text-zinc-500">
-        {t("noSaved")}
-      </p>
+      <>
+        <ImportClipForm
+          onImported={() => {
+            void loadSaved();
+          }}
+        />
+        <div className={SAVED_GRID_CLASS}>
+          {Array.from({ length: 6 }).map(
+            (_, index) => (
+              <div
+                key={index}
+                className={SAVED_SKELETON_CLASS}
+              />
+            ),
+          )}
+        </div>
+      </>
     );
   }
 
   return (
     <>
-<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">        {works.map((work) => {
-          const thumbnail =
-            getWorkThumbnail(work);
-          const sourceLabel =
-            getSourceLabel(work, {
-              youtube: t("sourceYoutube"),
-              tiktok: t("sourceTiktok"),
-              image: t("sourceImage"),
-            });
+      <ImportClipForm
+        onImported={() => {
+          void loadSaved();
+        }}
+      />
 
-          return (
-            <button
-              key={work.id}
-              type="button"
-              onClick={() =>
-                openWork(work)
-              }
-              className="group mx-auto w-[88%] text-left"
-            >
-              <article className="relative overflow-hidden rounded-2xl bg-neutral-950">
-              <div className="h-[260px] w-full">
-                  {thumbnail ? (
-                    <img
-                      src={thumbnail}
-                      alt=""
-                      draggable={false}
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-sm text-white/30">
-                      —
-                    </div>
-                  )}
-                </div>
+      {works.length === 0 ? (
+        <p className="text-sm text-zinc-500">
+          {t("noSaved")}
+        </p>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={(event) => {
+            void handleDragEnd(event);
+          }}
+          onDragCancel={handleDragCancel}
+        >
+          <SortableContext
+            items={workIds}
+            strategy={rectSortingStrategy}
+          >
+            <div className={SAVED_GRID_CLASS}>
+              {works.map((work) => (
+                <SortableSavedCard
+                  key={work.id}
+                  work={work}
+                  onOpen={openWork}
+                />
+              ))}
+            </div>
+          </SortableContext>
 
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-3">
-                  {work.artistName && (
-                    <p className="line-clamp-1 text-sm font-medium text-white">
-                      {work.artistName}
-                    </p>
-                  )}
-                  <p className="mt-0.5 text-[11px] uppercase tracking-wide text-white/70">
-                    {sourceLabel}
-                  </p>
-                </div>
-
-                {isPlayableVideo(work) && (
-                  <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-[10px] text-white/90">
-                    ▶
-                  </div>
-                )}
-
-                <div className="pointer-events-none absolute left-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-gray-950">
-                  {t("savedState")}
-                </div>
-              </article>
-            </button>
-          );
-        })}
-      </div>
+          <DragOverlay>
+            {activeWork ? (
+              <div className="aspect-[9/16] w-[calc((100vw-1.5rem)/3)] scale-[1.02] shadow-[0_12px_28px_rgba(0,0,0,0.55)] sm:aspect-auto sm:h-[260px] sm:w-[150px]">
+                <SavedCardFace work={activeWork} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      )}
 
       {selectedWork && (
         <WorkMediaModal
@@ -351,20 +621,6 @@ export default function SavedGrid() {
             void handleUnsave(
               selectedWork,
             )
-          }
-          onOriginalClick={() =>
-            trackProductEvent({
-              event_name:
-                "original_click",
-              work_id:
-                selectedWork.id,
-              metadata: {
-                source:
-                  getAnalyticsSource(
-                    selectedWork,
-                  ),
-              },
-            })
           }
         />
       )}

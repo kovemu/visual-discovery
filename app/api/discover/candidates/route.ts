@@ -13,7 +13,10 @@ import {
   parseDiscoverCategory,
 } from "@/lib/discover/discoverRowCategories";
 import type { CreatorCategory } from "@/lib/creator/creatorCategories";
-import { getDiscoverCandidateBatch } from "@/lib/discover/getRealDiscoverWorks";
+import {
+  getDiscoverCandidateBatch,
+  normalizeDiscoverSearchQuery,
+} from "@/lib/discover/getRealDiscoverWorks";
 
 const WORKS_PER_BATCH = 36;
 
@@ -110,7 +113,8 @@ async function getWorkPageCount() {
       count: "exact",
       head: true,
     })
-    .eq("featured", false);
+    .eq("featured", false)
+    .eq("discover_eligible", true);
 
   if (error) {
     console.log(
@@ -150,6 +154,11 @@ export async function GET(
 
   const categories =
     resolveDiscoverCategories(request);
+
+  const searchQuery =
+    normalizeDiscoverSearchQuery(
+      request.nextUrl.searchParams.get("q"),
+    );
 
   const roundValue =
     request.nextUrl.searchParams.get(
@@ -216,6 +225,7 @@ export async function GET(
       await getDiscoverCandidateBatch(
         categories,
         virtualRound,
+        searchQuery,
       );
 
     return NextResponse.json({
@@ -231,6 +241,7 @@ export async function GET(
     await getDiscoverCandidateBatch(
       categories,
       safeRound,
+      searchQuery,
     );
 
   return NextResponse.json({

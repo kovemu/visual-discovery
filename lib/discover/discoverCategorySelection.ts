@@ -100,3 +100,17 @@ export function workMatchesDiscoverCategories(
     (category) => category === workCategory,
   );
 }
+
+export function buildEffectiveCategoryOrFilter(
+  categories: CreatorCategory[],
+): string {
+  if (categories.length === 1) {
+    const category = categories[0];
+
+    return `discover_category.eq.${category},and(discover_category.is.null,creators.category.eq.${category})`;
+  }
+
+  const list = categories.join(",");
+
+  return `discover_category.in.(${list}),and(discover_category.is.null,creators.category.in.(${list}))`;
+}

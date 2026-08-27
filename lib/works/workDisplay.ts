@@ -1,12 +1,15 @@
 export type WorkMediaItem = {
   id: string;
-  artistId: string;
-  artistName: string;
+  artistId?: string;
+  artistName?: string;
   type?: "image" | "youtube" | "tiktok";
   source?: string;
   image?: string;
   videoId?: string;
   sourceUrl?: string;
+  title?: string | null;
+  description?: string | null;
+  caption?: string | null;
 };
 
 export function getAnalyticsSource(

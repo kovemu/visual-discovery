@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { FeedItem } from "@/components/discover/DiscoverFeed";
 
 import {
+  buildEffectiveCategoryOrFilter,
   workMatchesDiscoverCategories,
 } from "@/lib/discover/discoverCategorySelection";
 import type { CreatorCategory } from "@/lib/creator/creatorCategories";
@@ -65,6 +66,8 @@ type WorkRow = {
 
   duration_seconds: number | null;
 
+  discover_category: string | null;
+
 };
 
 
@@ -114,6 +117,50 @@ export type DiscoverCandidateBatch = {
   workPage: number;
 
 };
+
+
+
+export function normalizeDiscoverSearchQuery(
+  query: string | null | undefined,
+): string | null {
+  const trimmed = query?.trim() ?? "";
+
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function escapePostgrestIlikeValue(
+  value: string,
+): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_");
+}
+
+function applyDiscoverSearchFilter<
+  T extends {
+    or: (
+      filters: string,
+      options?: {
+        foreignTable?: string;
+      },
+    ) => T;
+  },
+>(
+  query: T,
+  searchQuery: string | null,
+): T {
+  if (!searchQuery) {
+    return query;
+  }
+
+  const pattern = `%${escapePostgrestIlikeValue(searchQuery)}%`;
+
+  return query.or(
+    `title.ilike."${pattern}",description.ilike."${pattern}"`,
+  );
+}
 
 
 
@@ -195,22 +242,51 @@ function resolveDurationSeconds(
 
 
 
+function resolveEffectiveCategory(
+  work: Pick<WorkRow, "discover_category">,
+  creator: CreatorRow | null,
+) {
+  const raw = (
+    work.discover_category ??
+    creator?.category ??
+    ""
+  ).trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  return (
+    raw.charAt(0).toUpperCase() +
+    raw.slice(1)
+  );
+}
+
+
+
 function mapWork(
 
   work: WorkRow,
 
-  creator: CreatorRow,
+  creator: CreatorRow | null,
 
 ): FeedItem {
 
   const category =
-
-    creator.category.charAt(0).toUpperCase() +
-
-    creator.category.slice(1);
+    resolveEffectiveCategory(
+      work,
+      creator,
+    );
 
   const durationSeconds =
     resolveDurationSeconds(work);
+
+  const artistId = creator?.id || undefined;
+  const artistName = creator?.name || undefined;
+  const artistTags = creator?.tags ?? [];
+  const artistUrl = creator
+    ? `/creator/${creator.id}`
+    : undefined;
 
 
 
@@ -226,13 +302,13 @@ function mapWork(
 
       id: String(work.id),
 
-      artistId: creator.id,
+      artistId,
 
-      artistName: creator.name,
+      artistName,
 
       category,
 
-      artistTags: creator.tags ?? [],
+      artistTags,
 
       type: "youtube",
 
@@ -244,6 +320,10 @@ function mapWork(
 
         work.thumbnail_url ?? undefined,
 
+      title: work.title,
+
+      description: work.description,
+
       caption:
 
         work.description ??
@@ -254,7 +334,7 @@ function mapWork(
 
       sourceUrl: work.source_url,
 
-      artistUrl: `/creator/${creator.id}`,
+      artistUrl,
 
       durationSeconds,
 
@@ -276,13 +356,13 @@ function mapWork(
 
       id: String(work.id),
 
-      artistId: creator.id,
+      artistId,
 
-      artistName: creator.name,
+      artistName,
 
       category,
 
-      artistTags: creator.tags ?? [],
+      artistTags,
 
       type: "tiktok",
 
@@ -294,6 +374,10 @@ function mapWork(
 
         work.thumbnail_url ?? undefined,
 
+      title: work.title,
+
+      description: work.description,
+
       caption:
 
         work.description ??
@@ -304,7 +388,7 @@ function mapWork(
 
       sourceUrl: work.source_url,
 
-      artistUrl: `/creator/${creator.id}`,
+      artistUrl,
 
       durationSeconds,
 
@@ -318,13 +402,13 @@ function mapWork(
 
     id: String(work.id),
 
-    artistId: creator.id,
+    artistId,
 
-    artistName: creator.name,
+    artistName,
 
     category,
 
-    artistTags: creator.tags ?? [],
+    artistTags,
 
     type: "image",
 
@@ -336,6 +420,10 @@ function mapWork(
 
       work.source_url,
 
+    title: work.title,
+
+    description: work.description,
+
     caption:
 
       work.description ??
@@ -346,7 +434,7 @@ function mapWork(
 
     sourceUrl: work.source_url,
 
-    artistUrl: `/creator/${creator.id}`,
+    artistUrl,
 
     durationSeconds,
 
@@ -378,6 +466,8 @@ async function getDiscoverableWorkCount(
 
   categories: CreatorCategory[] | null = null,
 
+  searchQuery: string | null = null,
+
 ) {
 
   const dbCategories =
@@ -391,7 +481,7 @@ async function getDiscoverableWorkCount(
 
       dbCategories
 
-        ? "id, artist:creators!inner(category)"
+        ? "id, artist:creators(category)"
 
         : "id",
 
@@ -405,33 +495,24 @@ async function getDiscoverableWorkCount(
 
     )
 
-    .eq("featured", false);
+    .eq("featured", false)
+
+    .eq("discover_eligible", true);
 
   if (dbCategories) {
 
-    if (dbCategories.length === 1) {
-
-      countQuery = countQuery.eq(
-
-        "creators.category",
-
-        dbCategories[0],
-
-      );
-
-    } else {
-
-      countQuery = countQuery.in(
-
-        "creators.category",
-
+    countQuery = countQuery.or(
+      buildEffectiveCategoryOrFilter(
         dbCategories,
-
-      );
-
-    }
+      ),
+    );
 
   }
+
+  countQuery = applyDiscoverSearchFilter(
+    countQuery,
+    searchQuery,
+  );
 
   const {
 
@@ -483,7 +564,14 @@ export async function getDiscoverCandidateBatch(
 
   round = 0,
 
+  searchQuery: string | null = null,
+
 ): Promise<DiscoverCandidateBatch> {
+
+  const normalizedSearch =
+    normalizeDiscoverSearchQuery(
+      searchQuery,
+    );
 
   const safeRound = Math.max(
 
@@ -509,6 +597,8 @@ export async function getDiscoverCandidateBatch(
       supabase,
 
       categories,
+
+      normalizedSearch,
 
     );
 
@@ -568,7 +658,9 @@ export async function getDiscoverCandidateBatch(
 
           duration_seconds,
 
-          artist:creators!inner (
+          discover_category,
+
+          artist:creators (
 
             id,
 
@@ -584,33 +676,24 @@ export async function getDiscoverCandidateBatch(
 
     )
 
-    .eq("featured", false);
+    .eq("featured", false)
+
+    .eq("discover_eligible", true);
 
   if (dbCategories) {
 
-    if (dbCategories.length === 1) {
-
-      worksQuery = worksQuery.eq(
-
-        "creators.category",
-
-        dbCategories[0],
-
-      );
-
-    } else {
-
-      worksQuery = worksQuery.in(
-
-        "creators.category",
-
+    worksQuery = worksQuery.or(
+      buildEffectiveCategoryOrFilter(
         dbCategories,
-
-      );
-
-    }
+      ),
+    );
 
   }
+
+  worksQuery = applyDiscoverSearchFilter(
+    worksQuery,
+    normalizedSearch,
+  );
 
   const { data, error } =
 
@@ -695,14 +778,6 @@ export async function getDiscoverCandidateBatch(
           row.artist,
 
         );
-
-
-
-      if (!creator) {
-
-        return null;
-
-      }
 
 
 

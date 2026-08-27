@@ -1,5 +1,7 @@
 import {
   CREATOR_CATEGORIES,
+  CREATOR_CATEGORY_OPTIONS,
+  isCreatorCategory,
   type CreatorCategory,
 } from "@/lib/creator/creatorCategories";
 
@@ -25,10 +27,10 @@ export const DISCOVER_CATEGORY_TABS: {
   label: string;
 }[] = [
   { id: "all", label: "ALL" },
-  { id: "kpop", label: "KPOP" },
-  { id: "cheer", label: "CHEER" },
-  { id: "cos", label: "COS" },
-  { id: "look", label: "LOOK" },
+  ...CREATOR_CATEGORY_OPTIONS.map((option) => ({
+    id: option.value,
+    label: option.label,
+  })),
 ];
 
 export function isDiscoverCategory(
@@ -36,10 +38,7 @@ export function isDiscoverCategory(
 ): value is DiscoverCategory {
   return (
     value === "all" ||
-    value === "kpop" ||
-    value === "cheer" ||
-    value === "cos" ||
-    value === "look"
+    isCreatorCategory(value ?? "")
   );
 }
 
