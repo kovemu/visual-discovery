@@ -15,7 +15,6 @@ import type { FeedItem } from "@/components/discover/DiscoverFeed";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import {
   formatDurationSeconds,
-  getSourceLabel,
   getWorkThumbnail,
   isPlayableVideo,
 } from "@/lib/works/workDisplay";
@@ -44,22 +43,22 @@ function getVisibleCardTarget(
   trackWidth: number,
 ): number {
   if (trackWidth < 480) {
-    return 1.35;
+    return 1.6;
   }
 
   if (trackWidth < 768) {
-    return 2.85;
+    return 3.0;
   }
 
   if (trackWidth < 1024) {
-    return 3.4;
+    return 3.6;
   }
 
   if (trackWidth < 1280) {
-    return 5.45;
+    return 5.8;
   }
 
-  return 6.45;
+  return 6.9;
 }
 
 function getCarouselCardWidth(
@@ -532,14 +531,6 @@ export default function DiscoverCarousel({
   function renderCard(work: FeedItem, feedIndex: number) {
     const isPlayable = isPlayableVideo(work);
     const thumbnail = getWorkThumbnail(work);
-    const sourceLabel = getSourceLabel(
-      work,
-      {
-        youtube: t("sourceYoutube"),
-        tiktok: t("sourceTiktok"),
-        image: t("sourceImage"),
-      },
-    );
 
     return (
       <div
@@ -595,8 +586,6 @@ export default function DiscoverCarousel({
             </div>
           )}
 
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-t from-black/80 via-black/25 to-transparent" />
-
           {isPlayable && (
             <div className="pointer-events-none absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-[10px] text-white/90 backdrop-blur-[2px] md:h-8 md:w-8 md:text-[11px]">
               ▶
@@ -617,17 +606,6 @@ export default function DiscoverCarousel({
                 )}
               </div>
             )}
-
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 p-2.5 text-white md:p-3">
-            {work.artistName && (
-              <p className="line-clamp-1 text-xs font-medium tracking-tight text-white">
-                {work.artistName}
-              </p>
-            )}
-            <p className="mt-0.5 line-clamp-1 text-[10px] font-medium uppercase tracking-wide text-white/70">
-              {sourceLabel}
-            </p>
-          </div>
         </article>
       </div>
     );

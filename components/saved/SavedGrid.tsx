@@ -257,8 +257,7 @@ export default function SavedGrid() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
-        {Array.from({ length: 6 }).map(
+<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">        {Array.from({ length: 6 }).map(
           (_, index) => (
             <div
               key={index}
@@ -280,8 +279,7 @@ export default function SavedGrid() {
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
-        {works.map((work) => {
+<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">        {works.map((work) => {
           const thumbnail =
             getWorkThumbnail(work);
           const sourceLabel =
@@ -298,10 +296,10 @@ export default function SavedGrid() {
               onClick={() =>
                 openWork(work)
               }
-              className="group text-left"
+              className="group mx-auto w-[88%] text-left"
             >
               <article className="relative overflow-hidden rounded-2xl bg-neutral-950">
-                <div className="aspect-[3/4] w-full">
+              <div className="h-[260px] w-full">
                   {thumbnail ? (
                     <img
                       src={thumbnail}
