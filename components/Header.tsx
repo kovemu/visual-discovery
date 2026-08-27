@@ -9,6 +9,14 @@ import LogoutButton from "@/components/LogoutButton";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 
+function isNavActive(pathname: string, href: string) {
+  if (href === "/") {
+    return pathname === "/" || pathname === "/discover";
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
@@ -76,25 +84,35 @@ export default function Header() {
     };
   }, [supabase]);
 
-  const navLinkClass = (href: string) =>
-    `text-xs font-semibold transition md:text-sm ${
-      pathname === href
-        ? "text-white"
-        : "text-zinc-400 hover:text-white"
+  const navLinkClass = (href: string) => {
+    const active = isNavActive(pathname, href);
+
+    return `relative pb-1 text-[13px] font-medium tracking-[0.04em] transition ${
+      active
+        ? "text-violet-400 after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-violet-400"
+        : "text-zinc-400 hover:text-zinc-100"
     }`;
+  };
 
   return (
-    <header className="border-b border-[#262626] bg-[#050505]">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:h-16 md:px-6 md:py-0 lg:px-10">
+    <header className="border-b border-white/[0.06] bg-[#050505]">
+      <div className="mx-auto flex h-12 max-w-7xl items-center justify-between gap-6 px-4 md:h-14 md:px-6 lg:px-10">
         <Link
           href="/"
-          className="shrink-0 text-lg font-black tracking-tight text-white"
+          className="group flex shrink-0 items-center gap-2.5"
+          aria-label="KOVEMU home"
         >
-          Visual
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 rounded-full bg-violet-500"
+          />
+          <span className="text-[15px] font-semibold uppercase tracking-[0.34em] text-white md:text-[16px]">
+            KOVEMU
+          </span>
         </Link>
 
-        <div className="flex items-center gap-3 md:gap-5">
-          <nav className="flex items-center gap-3 md:gap-5">
+        <div className="flex items-center gap-5 md:gap-7">
+          <nav className="flex items-center gap-5 md:gap-7">
             <Link
               href="/"
               className={navLinkClass("/")}
@@ -122,7 +140,7 @@ export default function Header() {
                     true,
                   )
                 }
-                className="shrink-0 text-xs font-semibold text-zinc-300 transition hover:text-white md:text-sm"
+                className="shrink-0 text-[13px] font-medium tracking-[0.04em] text-zinc-400 transition hover:text-zinc-100"
               >
                 {t("login")}
               </button>

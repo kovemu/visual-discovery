@@ -333,10 +333,6 @@ export default function DiscoverFeed({
 
   return (
     <>
-      <p className="mt-1 mb-4 text-center text-xs text-zinc-500 md:mb-5 md:text-sm">
-        {t("discoverHint")}
-      </p>
-
       <div className="w-full min-w-0 pt-8 md:pt-12">
         <div className="mb-5 flex flex-wrap items-center gap-2 md:mb-6 md:gap-3">
           <button
@@ -408,6 +404,15 @@ export default function DiscoverFeed({
           }}
           onPrune={feed.prune}
         />
+
+        <div className="mt-7 text-center md:mt-8">
+          <p className="text-sm text-zinc-400">
+            {t("discoverHint")}
+          </p>
+          <p className="mt-1 hidden text-xs text-zinc-600 md:block">
+            {t("discoverWheelHint")}
+          </p>
+        </div>
       </div>
 
       <SavedPanel

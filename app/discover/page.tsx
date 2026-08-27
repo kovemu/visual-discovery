@@ -40,8 +40,7 @@ export default async function DiscoverPage() {
     <main className="min-h-screen bg-[#050505] text-white">
       <Header />
 
-      <section className="mx-auto max-w-7xl px-6 pb-10 pt-1 lg:px-10 lg:pb-12 xl:pr-[88px]">
-        <DiscoverFeed works={feedWorks} />
+      <section className="mx-auto max-w-7xl px-6 pb-10 pt-8 lg:px-10 lg:pb-12 lg:pt-10 xl:pr-[88px]">        <DiscoverFeed works={feedWorks} />
       </section>
     </main>
   );

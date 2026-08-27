@@ -884,7 +884,7 @@ export default function SavedPanel({
         onMouseLeave={() =>
           setOpen(false)
         }
-        className={`fixed bottom-[69px] right-0 top-14 z-40 hidden overflow-hidden transition-all duration-200 md:top-16 xl:block ${
+        className={`fixed bottom-[69px] right-0 top-12 z-40 hidden overflow-hidden transition-all duration-200 md:top-14 xl:block ${
           open
             ? "w-[340px]"
             : "w-[72px]"

@@ -23,6 +23,8 @@ export const translations = {
     confirm18: "I confirm that everyone depicted in this submission is 18 or older.",
     discoverHint:
       "Tap a clip. Pick what you like. Keep exploring.",
+    discoverWheelHint:
+      "Use your mouse wheel to swipe through cards.",
     noWorks: "No clips yet.",
     noSaved: "Nothing picked yet.",
     close: "Close",
@@ -68,6 +70,8 @@ export const translations = {
       "이 콘텐츠에 등장하는 모든 인물이 만 18세 이상임을 확인합니다.",
     discoverHint:
       "영상을 눌러보고, 마음에 들면 저장하세요.",
+    discoverWheelHint:
+      "마우스 휠로 카드를 넘길 수 있습니다.",
     noWorks: "아직 클립이 없습니다.",
     noSaved: "저장한 클립이 없습니다.",
     close: "닫기",

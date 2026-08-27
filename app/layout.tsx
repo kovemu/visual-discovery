@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 const SITE_TITLE =
-  "Visual | Clip Discovery";
+  "KOVEMU | Clip Discovery";
 
 const SITE_DESCRIPTION =
   "Discover visual clips through a simple browse, save, and next flow.";
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
     url: "https://visual-discovery.local",
-    siteName: "Visual",
+    siteName: "KOVEMU",
     type: "website",
   },
   twitter: {
