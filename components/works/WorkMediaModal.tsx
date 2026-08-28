@@ -1,8 +1,11 @@
 "use client";
 
+import RotatedWorkThumbnail from "@/components/works/RotatedWorkThumbnail";
+import RotatedWorkVideo from "@/components/works/RotatedWorkVideo";
 import TikTokPlayerEmbed from "@/components/works/TikTokPlayerEmbed";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import type { WorkMediaItem } from "@/lib/works/workDisplay";
+import { isRotatedMedia } from "@/lib/works/workRotation";
 
 type WorkMediaModalProps = {
   work: WorkMediaItem;
@@ -13,12 +16,12 @@ type WorkMediaModalProps = {
 
 function getModalTitle(work: WorkMediaItem) {
   const title = work.title?.trim();
-
   return title || null;
 }
 
 function getModalDescription(work: WorkMediaItem) {
   const title = work.title?.trim();
+
   const description =
     work.description?.trim() ||
     work.caption?.trim() ||
@@ -45,9 +48,15 @@ export default function WorkMediaModal({
 
   const title = getModalTitle(work);
   const description = getModalDescription(work);
+
   const hasTextContent = Boolean(
     title || description,
   );
+
+  const isRotatedYoutube =
+    work.type === "youtube" &&
+    Boolean(work.videoId) &&
+    isRotatedMedia(work.rotationDegrees);
 
   return (
     <div
@@ -55,7 +64,11 @@ export default function WorkMediaModal({
       onClick={onClose}
     >
       <div
-        className="relative flex h-[calc(100dvh-24px)] max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-none flex-col overflow-hidden rounded-2xl bg-[#111111] md:h-auto md:max-h-[80vh] md:w-full md:max-w-4xl md:flex-row"
+        className={`relative flex h-[calc(100dvh-24px)] max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-none flex-col overflow-hidden rounded-2xl bg-[#111111] md:max-h-[80vh] md:w-full md:max-w-4xl md:flex-row ${
+          isRotatedYoutube
+            ? "md:h-[min(80vh,720px)]"
+            : "md:h-auto"
+        }`}
         onClick={(event) =>
           event.stopPropagation()
         }
@@ -63,28 +76,51 @@ export default function WorkMediaModal({
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden bg-neutral-900">
           {work.type === "youtube" &&
           work.videoId ? (
-            <iframe
-              src={`https://www.youtube.com/embed/${work.videoId}?autoplay=1&rel=0`}
-              title={work.artistName ? `${work.artistName} video` : "Video"}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              className="h-full max-h-full w-full max-w-full border-0 md:aspect-[9/16] md:max-h-[80vh] md:w-full"
+            <RotatedWorkVideo
+              videoId={work.videoId}
+              title={
+                work.artistName
+                  ? `${work.artistName} video`
+                  : "Video"
+              }
+              rotationDegrees={
+                work.rotationDegrees
+              }
             />
           ) : work.type === "tiktok" &&
             work.videoId ? (
             <TikTokPlayerEmbed
               videoId={work.videoId}
-              title={work.artistName ? `${work.artistName} TikTok` : "TikTok"}
+              title={
+                work.artistName
+                  ? `${work.artistName} TikTok`
+                  : "TikTok"
+              }
               className="!h-full !max-h-full !w-full !max-w-full md:!aspect-[9/16] md:!h-[min(80vh,720px)] md:!w-[min(calc(min(80vh,720px)*9/16),100%)]"
             />
-          ) : (
-            <img
-              src={work.image}
-              alt={work.artistName ? `${work.artistName} work` : "Work"}
-              draggable={false}
-              className="max-h-full max-w-full object-contain md:max-h-[80vh] md:w-full"
-            />
-          )}
+          ) : work.image ? (
+            <div className="flex h-full w-full overflow-hidden md:max-h-[80vh]">
+              <RotatedWorkThumbnail
+                src={work.image}
+                alt={
+                  work.artistName
+                    ? `${work.artistName} work`
+                    : "Work"
+                }
+                rotationDegrees={
+                  work.rotationDegrees
+                }
+                layout={
+                  isRotatedMedia(
+                    work.rotationDegrees,
+                  )
+                    ? "modal"
+                    : "thumbnail"
+                }
+                imgClassName="max-h-full max-w-full object-contain md:max-h-[80vh] md:w-full"
+              />
+            </div>
+          ) : null}
         </div>
 
         <aside className="relative w-full shrink-0 bg-[#111111] px-4 py-3.5 md:w-[300px] md:border-l md:border-white/10 md:p-6">
@@ -104,6 +140,7 @@ export default function WorkMediaModal({
                   {title}
                 </p>
               )}
+
               {description && (
                 <p
                   className={`line-clamp-5 text-sm leading-relaxed text-zinc-300 ${
@@ -119,10 +156,11 @@ export default function WorkMediaModal({
           <button
             type="button"
             onClick={onToggleSave}
-            className={`mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full border text-sm font-semibold transition
-              md:absolute md:left-6 md:right-6 md:top-[43%] md:mt-0 md:w-auto md:-translate-y-1/2 ${              isSaved
-              ? "border-violet-500 bg-violet-600 text-white hover:bg-violet-500"
-              : "border-white bg-white text-black hover:bg-white/90"            }`}
+            className={`mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full border text-sm font-semibold transition md:absolute md:left-6 md:right-6 md:top-[43%] md:mt-0 md:w-auto md:-translate-y-1/2 ${
+              isSaved
+                ? "border-violet-500 bg-violet-600 text-white hover:bg-violet-500"
+                : "border-white bg-white text-black hover:bg-white/90"
+            }`}
           >
             {isSaved
               ? t("pickedState")

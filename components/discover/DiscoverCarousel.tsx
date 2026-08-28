@@ -13,6 +13,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import type { FeedItem } from "@/components/discover/DiscoverFeed";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
+import RotatedWorkThumbnail from "@/components/works/RotatedWorkThumbnail";
 import {
   formatDurationSeconds,
   getWorkThumbnail,
@@ -563,20 +564,21 @@ export default function DiscoverCarousel({
           }`}
         >
           {thumbnail ? (
-            <img
+            <RotatedWorkThumbnail
               src={thumbnail}
               alt={
                 work.artistName
                   ? `${work.artistName} work`
                   : "Discover work"
               }
+              rotationDegrees={work.rotationDegrees}
               draggable={false}
               referrerPolicy={
                 work.type === "tiktok"
                   ? "no-referrer"
                   : undefined
               }
-              className="h-full w-full object-cover object-center transition duration-500 ease-out group-hover:scale-[1.02]"
+              imgClassName="h-full w-full object-cover object-center transition duration-500 ease-out group-hover:scale-[1.02]"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-white/30">

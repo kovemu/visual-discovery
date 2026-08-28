@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+import { normalizeRotationDegrees } from "@/lib/works/workRotation";
 import { buildCanonicalTikTokUrl } from "@/lib/tiktok/extractTikTokVideoId";
 import {
   cacheTikTokThumbnail,
@@ -21,6 +22,7 @@ type ImportWork = {
   durationSeconds?: number;
   featured?: boolean;
   source?: string;
+  rotation_degrees?: number;
 };
 
 type ImportWorkRow = {
@@ -35,6 +37,7 @@ type ImportWorkRow = {
   published_at: string | null;
   duration_seconds: number | null;
   featured: boolean;
+  rotation_degrees: number;
 };
 
 function resolveWorkSource(source: unknown) {
@@ -232,6 +235,9 @@ export async function POST(request: NextRequest) {
               : null),
           duration_seconds: work.durationSeconds ?? null,
           featured: work.featured === true,
+          rotation_degrees: normalizeRotationDegrees(
+            work.rotation_degrees,
+          ),
         };
       },
     );

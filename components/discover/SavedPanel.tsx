@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import RotatedWorkThumbnail from "@/components/works/RotatedWorkThumbnail";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -32,6 +33,7 @@ type PickedWorkRow = {
   thumbnail_url: string | null;
   title: string | null;
   description: string | null;
+  rotation_degrees: number | null;
   artist:
     | {
         id: string;
@@ -212,6 +214,7 @@ function mapPickedWork(
     title: work.title,
     description: work.description,
     sourceUrl: work.source_url,
+    rotationDegrees: work.rotation_degrees ?? 0,
     pickedAt,
   };
 }
@@ -547,11 +550,12 @@ function SavedCardStackRow({
               }
             >
               {thumbnail ? (
-                <img
+                <RotatedWorkThumbnail
                   src={thumbnail}
                   alt=""
+                  rotationDegrees={work.rotationDegrees}
                   draggable={false}
-                  className="h-full w-full object-cover"
+                  imgClassName="h-full w-full object-cover"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-zinc-900 text-[10px] font-semibold text-white/50">
@@ -673,6 +677,7 @@ export default function SavedPanel({
               thumbnail_url,
               title,
               description,
+              rotation_degrees,
               artist:creators (
                 id,
                 name

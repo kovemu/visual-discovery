@@ -30,6 +30,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 
 import WorkMediaModal from "@/components/works/WorkMediaModal";
+import RotatedWorkThumbnail from "@/components/works/RotatedWorkThumbnail";
 import ImportClipForm from "@/components/saved/ImportClipForm";
 import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
@@ -60,6 +61,7 @@ type PickedWorkRow = {
   thumbnail_url: string | null;
   title: string | null;
   description: string | null;
+  rotation_degrees: number | null;
   artist:
     | {
         id: string;
@@ -173,6 +175,7 @@ function mapPickedWork(
       work.description ??
       work.title ??
       null,
+    rotationDegrees: work.rotation_degrees ?? 0,
   };
 }
 
@@ -187,11 +190,12 @@ function SavedCardFace({
     <article className="relative overflow-hidden rounded-2xl bg-neutral-950">
       <div className={SAVED_CARD_MEDIA_CLASS}>
         {thumbnail ? (
-          <img
+          <RotatedWorkThumbnail
             src={thumbnail}
             alt=""
+            rotationDegrees={work.rotationDegrees}
             draggable={false}
-            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+            imgClassName="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-white/30">
@@ -338,6 +342,7 @@ export default function SavedGrid() {
               thumbnail_url,
               title,
               description,
+              rotation_degrees,
               artist:creators (
                 id,
                 name

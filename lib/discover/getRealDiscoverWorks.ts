@@ -39,6 +39,8 @@ export {
 
 
 
+import { normalizeRotationDegrees } from "@/lib/works/workRotation";
+
 const WORKS_PER_BATCH = 36;
 
 
@@ -66,6 +68,8 @@ type WorkRow = {
   duration_seconds: number | null;
 
   discover_category: string | null;
+
+  rotation_degrees: number | null;
 
 };
 
@@ -185,6 +189,8 @@ const DISCOVER_WORK_SELECT = `
 
           discover_category,
 
+          rotation_degrees,
+
           artist:creators (
 
             id,
@@ -222,6 +228,8 @@ const DISCOVER_WORK_CREATOR_SELECT = `
           duration_seconds,
 
           discover_category,
+
+          rotation_degrees,
 
           artist:creators!inner (
 
@@ -640,6 +648,11 @@ function mapWork(
   const durationSeconds =
     resolveDurationSeconds(work);
 
+  const rotationDegrees =
+    normalizeRotationDegrees(
+      work.rotation_degrees,
+    );
+
   const artistId = creator?.id || undefined;
   const artistName = creator?.name || undefined;
   const artistTags = creator?.tags ?? [];
@@ -697,6 +710,8 @@ function mapWork(
 
       durationSeconds,
 
+      rotationDegrees,
+
     };
 
   }
@@ -751,6 +766,8 @@ function mapWork(
 
       durationSeconds,
 
+      rotationDegrees,
+
     };
 
   }
@@ -796,6 +813,8 @@ function mapWork(
     artistUrl,
 
     durationSeconds,
+
+    rotationDegrees,
 
   };
 

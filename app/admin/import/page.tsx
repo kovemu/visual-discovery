@@ -29,6 +29,10 @@ import CreatorCategorySelect from "@/components/admin/CreatorCategorySelect";
 import {
   DEFAULT_CREATOR_CATEGORY,
 } from "@/lib/creator/creatorCategories";
+import {
+  WORK_ROTATION_OPTIONS,
+  type WorkRotationDegrees,
+} from "@/lib/works/workRotation";
 
 type YouTubeVideo = {
   id: string;
@@ -651,6 +655,13 @@ const [
     useState<Set<string>>(
       new Set(),
     );
+
+  const [
+    videoRotationById,
+    setVideoRotationById,
+  ] = useState<
+    Record<string, WorkRotationDegrees>
+  >({});
 
   const [
     previewVideo,
@@ -1850,6 +1861,22 @@ function removeExternalImageDraft(
     );
   }
 
+  function getVideoRotation(
+    videoId: string,
+  ): WorkRotationDegrees {
+    return videoRotationById[videoId] ?? 0;
+  }
+
+  function setVideoRotation(
+    videoId: string,
+    degrees: WorkRotationDegrees,
+  ) {
+    setVideoRotationById((current) => ({
+      ...current,
+      [videoId]: degrees,
+    }));
+  }
+
   function toggleFeatured(
     videoId: string,
     event: React.MouseEvent,
@@ -2234,6 +2261,9 @@ function removeExternalImageDraft(
         durationSeconds:
           video.durationSeconds,
         featured: featuredVideoIds.has(
+          video.id,
+        ),
+        rotation_degrees: getVideoRotation(
           video.id,
         ),
         ...(video.source === "tiktok"
@@ -4712,6 +4742,51 @@ if (
                           </span>
                           Featured
                         </button>
+
+                        {!isTikTok && (
+                          <div
+                            className="mt-2 flex flex-wrap gap-1"
+                            onClick={(
+                              event,
+                            ) =>
+                              event.stopPropagation()
+                            }
+                          >
+                            {WORK_ROTATION_OPTIONS.map(
+                              (degrees) => {
+                                const active =
+                                  getVideoRotation(
+                                    video.id,
+                                  ) === degrees;
+
+                                return (
+                                  <button
+                                    key={
+                                      degrees
+                                    }
+                                    type="button"
+                                    onClick={() =>
+                                      setVideoRotation(
+                                        video.id,
+                                        degrees,
+                                      )
+                                    }
+                                    className={`rounded-md px-2 py-1 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950 ${
+                                      active
+                                        ? "bg-zinc-950 text-white"
+                                        : "bg-zinc-50 text-zinc-500 ring-1 ring-zinc-200 hover:bg-zinc-100"
+                                    }`}
+                                  >
+                                    {degrees ===
+                                    0
+                                      ? "Normal"
+                                      : `${degrees}°`}
+                                  </button>
+                                );
+                              },
+                            )}
+                          </div>
+                        )}
                       </div>
                     </article>
                   );

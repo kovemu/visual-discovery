@@ -15,6 +15,7 @@ import {
 } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import RotatedWorkThumbnail from "@/components/works/RotatedWorkThumbnail";
 import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 
 type PickPanelWork = {
@@ -27,6 +28,7 @@ type PickPanelWork = {
   type?: "image" | "youtube" | "tiktok";
   caption?: string | null;
   sourceUrl?: string;
+  rotationDegrees?: number;
 };
 
 type PickedWorkRow = {
@@ -37,6 +39,7 @@ type PickedWorkRow = {
   thumbnail_url: string | null;
   title: string | null;
   description: string | null;
+  rotation_degrees: number | null;
   artist: {
     id: string;
     name: string;
@@ -122,6 +125,7 @@ function mapPickedWork(
       work.title ??
       null,
     sourceUrl: work.source_url,
+    rotationDegrees: work.rotation_degrees ?? 0,
   };
 }
 
@@ -443,6 +447,7 @@ function changeFilter(
                 thumbnail_url,
                 title,
                 description,
+                rotation_degrees,
                 artist:creators (
                   id,
                   name,
@@ -1277,15 +1282,14 @@ function changeFilter(
                             aria-label={`Open ${artist.artistName} work`}
                           >
                             {thumbnail ? (
-                              <img
-                                src={
-                                  thumbnail
-                                }
+                              <RotatedWorkThumbnail
+                                src={thumbnail}
                                 alt=""
-                                draggable={
-                                  false
+                                rotationDegrees={
+                                  work.rotationDegrees
                                 }
-                                className="h-full w-full object-cover"
+                                draggable={false}
+                                imgClassName="h-full w-full object-cover"
                               />
                             ) : (
                               <div className="flex h-full w-full items-center justify-center bg-zinc-900 text-[10px] font-semibold text-white/50">
