@@ -10,6 +10,43 @@ import { isRealAccountUser } from "@/lib/auth/userKind";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 
+function KovemuSymbol() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 512 512"
+      aria-hidden="true"
+      className="h-5 w-5 shrink-0"
+    >
+      <defs>
+        <linearGradient
+          id="kovemuHeaderGradient"
+          x1="0"
+          y1="1"
+          x2="1"
+          y2="0"
+        >
+          <stop offset="0%" stopColor="#7C3AED" />
+          <stop offset="52%" stopColor="#C026D3" />
+          <stop offset="100%" stopColor="#EC4899" />
+        </linearGradient>
+      </defs>
+      <circle
+        cx="256"
+        cy="256"
+        r="248"
+        fill="url(#kovemuHeaderGradient)"
+      />
+      <circle cx="176" cy="190" r="34" fill="#FFFFFF" />
+      <circle cx="336" cy="190" r="34" fill="#FFFFFF" />
+      <path
+        d="M112 350 C112 264 176 224 256 224 C336 224 400 264 400 350 H336 C336 302 304 278 256 278 C208 278 176 302 176 350 Z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}
+
 function isNavActive(pathname: string, href: string) {
   if (href === "/") {
     return pathname === "/" || pathname === "/discover";
@@ -86,38 +123,41 @@ export default function Header() {
   const navLinkClass = (href: string) => {
     const active = isNavActive(pathname, href);
 
-    return `relative whitespace-nowrap pb-1 text-[13px] font-medium tracking-[0.04em] transition ${      active
-        ? "text-violet-400 after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-violet-400"
-        : "text-zinc-400 hover:text-zinc-100"
+    return `relative whitespace-nowrap text-[12px] font-medium tracking-[0.04em] transition ${
+      active
+        ? "text-[#b56cff] after:absolute after:inset-x-0 after:top-[calc(100%+11px)] after:h-px after:bg-[#b56cff]"
+        : "text-white/[0.68] hover:text-white/90"
     }`;
   };
 
   return (
     <header className="border-b border-white/[0.06] bg-[#050505]">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-2 px-4 md:h-16 md:gap-6 md:px-6 lg:px-10">
-        <div className="shrink-0">
+      <div className="mx-auto flex h-[60px] max-w-7xl items-center justify-between gap-3 px-4 md:px-10">
+        <div className="flex min-w-0 items-center">
           <Link
             href="/"
-            className="group flex items-center gap-2.5"
+            className="group flex shrink-0 items-center gap-3"
             aria-label="KOVEMU home"
           >
-            <span
-              aria-hidden="true"
-              className="h-1.5 w-1.5 rounded-full bg-violet-500"
-            />
+            <KovemuSymbol />
 
-            <span className="text-[15px] font-semibold uppercase tracking-[0.28em] text-white md:text-[20px] md:tracking-[0.32em]">
+            <span className="text-base font-semibold uppercase leading-none tracking-[0.34em] text-white">
               KOVEMU
             </span>
           </Link>
 
-          <p className="mt-0.5 hidden text-[10px] tracking-[0.08em] text-zinc-500 sm:block md:text-[13px]">
+          <span
+            aria-hidden="true"
+            className="mx-6 hidden h-7 w-px shrink-0 bg-white/[0.12] lg:block"
+          />
+
+          <p className="hidden truncate text-[11px] font-normal tracking-[0.02em] text-white/[0.42] lg:block">
             Discover Korean beauty in motion.
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 md:gap-7">
-          <nav className="flex items-center gap-2.5 md:gap-7">
+        <div className="flex shrink-0 items-center gap-4 md:gap-7">
+          <nav className="flex items-center gap-4 md:gap-7">
             <Link
               href="/"
               className={navLinkClass("/")}
@@ -139,7 +179,7 @@ export default function Header() {
               <button
                 type="button"
                 onClick={() => setShowAuthModal(true)}
-                className="shrink-0 whitespace-nowrap rounded-md !border !border-zinc-600 px-2.5 py-1.5 text-[12px] font-medium tracking-[0.04em] text-zinc-300 transition hover:!border-zinc-400 hover:text-white md:px-3"
+                className="h-8 shrink-0 whitespace-nowrap rounded-[5px] border border-white/[0.18] bg-transparent px-3 text-[12px] font-medium tracking-[0.04em] text-white/[0.68] transition hover:border-white/30 hover:text-white/90"
               >
                 {t("login")}
               </button>

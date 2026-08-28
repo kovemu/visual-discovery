@@ -111,10 +111,10 @@ export default function DiscoverFeed({
   );
 
   const categoryButtonClass = (isActive: boolean) =>
-    `rounded-sm border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition md:px-3 md:py-1.5 md:text-xs ${
+    `h-[30px] rounded border px-4 text-[10px] font-semibold uppercase tracking-[0.08em] transition ${
       isActive
-        ? "border-white/75 text-white"
-        : "border-transparent text-white/35 hover:border-white/20 hover:text-white/70"
+        ? "border-[rgba(192,132,252,0.65)] bg-[rgba(168,85,247,0.07)] text-[#c084fc] shadow-[0_0_0_1px_rgba(168,85,247,0.08)]"
+        : "border-white/15 bg-transparent text-white/[0.78] hover:border-white/28 hover:bg-white/[0.025]"
     }`;
 
   const [pickPanelAddedCount] = useState(0);
@@ -359,8 +359,23 @@ export default function DiscoverFeed({
 
   return (
     <>
-      <div className="w-full min-w-0 pt-8 md:pt-12">
-        <div className="mb-5 flex flex-wrap items-center gap-2 md:mb-6 md:gap-3">
+      <div className="w-full min-w-0">
+        <div className="mb-[22px]">
+          <div className="flex items-center gap-2.5">
+            <span
+              aria-hidden="true"
+              className="h-5 w-0.5 shrink-0 rounded-full bg-[#a855f7]"
+            />
+            <h1 className="text-xl font-semibold leading-tight text-white/[0.94]">
+              Discover
+            </h1>
+          </div>
+          <p className="mt-1.5 pl-3 text-[11px] font-normal text-white/[0.38]">
+            Curated clips. Effortless discovery.
+          </p>
+        </div>
+
+        <div className="mb-5 flex flex-wrap items-center gap-[11px] md:mb-6">
           <button
             type="button"
             onClick={() =>
@@ -414,7 +429,7 @@ export default function DiscoverFeed({
             }
             placeholder="Search clips"
             aria-label="Search clips"
-            className="h-8 min-w-[140px] flex-1 rounded-sm border border-white/15 bg-white/5 px-2.5 text-xs text-white outline-none transition placeholder:text-white/35 focus:border-white/30 sm:max-w-[200px] sm:flex-none"
+            className="ml-2 h-8 min-w-[140px] flex-1 rounded border border-white/12 bg-white/[0.04] px-2.5 text-[10px] text-white outline-none transition placeholder:text-white/[0.32] focus:border-white/25 sm:max-w-[180px] sm:flex-none md:text-[11px]"
           />
         </div>
 
@@ -438,10 +453,10 @@ export default function DiscoverFeed({
         />
 
         <div className="mt-7 text-center md:mt-8">
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-white/[0.38]">
             {t("discoverHint")}
           </p>
-          <p className="mt-1 hidden text-xs text-zinc-600 md:block">
+          <p className="mt-1 hidden text-xs text-white/25 md:block">
             {t("discoverWheelHint")}
           </p>
         </div>
