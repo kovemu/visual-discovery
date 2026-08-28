@@ -10,43 +10,6 @@ import { isRealAccountUser } from "@/lib/auth/userKind";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 
-function KovemuSymbol() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 512 512"
-      aria-hidden="true"
-      className="h-5 w-5 shrink-0"
-    >
-      <defs>
-        <linearGradient
-          id="kovemuHeaderGradient"
-          x1="0"
-          y1="1"
-          x2="1"
-          y2="0"
-        >
-          <stop offset="0%" stopColor="#7C3AED" />
-          <stop offset="52%" stopColor="#C026D3" />
-          <stop offset="100%" stopColor="#EC4899" />
-        </linearGradient>
-      </defs>
-      <circle
-        cx="256"
-        cy="256"
-        r="248"
-        fill="url(#kovemuHeaderGradient)"
-      />
-      <circle cx="176" cy="190" r="34" fill="#FFFFFF" />
-      <circle cx="336" cy="190" r="34" fill="#FFFFFF" />
-      <path
-        d="M112 350 C112 264 176 224 256 224 C336 224 400 264 400 350 H336 C336 302 304 278 256 278 C208 278 176 302 176 350 Z"
-        fill="#FFFFFF"
-      />
-    </svg>
-  );
-}
-
 function isNavActive(pathname: string, href: string) {
   if (href === "/") {
     return pathname === "/" || pathname === "/discover";
@@ -139,7 +102,14 @@ export default function Header() {
             className="group flex shrink-0 items-center gap-3"
             aria-label="KOVEMU home"
           >
-            <KovemuSymbol />
+            <img
+              src="/kovemu-icon.svg"
+              alt=""
+              aria-hidden="true"
+              width={20}
+              height={20}
+              className="h-5 w-5 shrink-0"
+            />
 
             <span className="text-base font-semibold uppercase leading-none tracking-[0.34em] text-white">
               KOVEMU
