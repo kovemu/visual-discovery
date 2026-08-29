@@ -1050,8 +1050,8 @@ function changeFilter(
         <button
           type="button"
           onClick={handleViewAllClick}
-          className="text-xs font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
-        >
+          className="shrink-0 whitespace-nowrap text-xs font-semibold text-fuchsia-600 transition hover:text-fuchsia-700"
+          >
           View all →
         </button>
       </div>

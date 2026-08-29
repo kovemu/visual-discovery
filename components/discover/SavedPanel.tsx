@@ -825,13 +825,11 @@ export default function SavedPanel({
           </div>
 
           <Link
-            href="/saved"
-            className="text-xs font-semibold text-violet-400 transition hover:text-violet-300"
-          >
-            {compact
-              ? "→"
-              : `${t("all")} →`}
-          </Link>
+  href="/saved"
+  className="shrink-0 whitespace-nowrap text-xs font-semibold text-violet-400 transition hover:text-violet-300"
+>
+  {t("all")} →
+</Link>
         </div>
 
         <div className="mt-4 flex items-center gap-3 text-xs font-semibold">
