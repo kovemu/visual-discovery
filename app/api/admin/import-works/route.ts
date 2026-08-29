@@ -4,10 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
 import { normalizeRotationDegrees } from "@/lib/works/workRotation";
 import { buildCanonicalTikTokUrl } from "@/lib/tiktok/extractTikTokVideoId";
-import {
-  cacheTikTokThumbnail,
-  isPermanentTikTokThumbnailUrl,
-} from "@/lib/tiktok/cacheTikTokThumbnail";
+import { resolveTikTokThumbnailUrl } from "@/lib/tiktok/resolveTikTokThumbnailUrl";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -69,7 +66,7 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function resolveTikTokThumbnailUrl({
+async function resolveTikTokThumbnailUrlForImport({
   videoId,
   incomingThumbnail,
   existingThumbnail,
@@ -78,30 +75,11 @@ async function resolveTikTokThumbnailUrl({
   incomingThumbnail: string | null;
   existingThumbnail: string | null;
 }) {
-  if (isPermanentTikTokThumbnailUrl(incomingThumbnail)) {
-    return incomingThumbnail;
-  }
-
-  if (!incomingThumbnail) {
-    return isPermanentTikTokThumbnailUrl(existingThumbnail)
-      ? existingThumbnail
-      : null;
-  }
-
-  const cached = await cacheTikTokThumbnail({
+  return resolveTikTokThumbnailUrl({
     videoId,
-    temporaryThumbnailUrl: incomingThumbnail,
+    incomingThumbnail,
+    existingThumbnail,
   });
-
-  if (cached) {
-    return cached;
-  }
-
-  if (isPermanentTikTokThumbnailUrl(existingThumbnail)) {
-    return existingThumbnail;
-  }
-
-  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -206,7 +184,7 @@ export async function POST(request: NextRequest) {
         let thumbnailUrl = incomingThumbnail;
 
         if (source === "tiktok") {
-          thumbnailUrl = await resolveTikTokThumbnailUrl({
+          thumbnailUrl = await resolveTikTokThumbnailUrlForImport({
             videoId: work.id,
             incomingThumbnail,
             existingThumbnail:

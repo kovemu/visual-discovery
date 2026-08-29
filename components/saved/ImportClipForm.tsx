@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 
 import AuthModal from "@/components/AuthModal";
 import { isRealAccountUser } from "@/lib/auth/userKind";
+import { parseSubmissionUrl } from "@/lib/submissions/parseSubmissionUrl";
 import { createClient } from "@/lib/supabase/client";
 
 type ImportClipFormProps = {
@@ -24,9 +25,10 @@ export default function ImportClipForm({
     setError("");
 
     const trimmed = url.trim();
+    const parsed = parseSubmissionUrl(trimmed);
 
-    if (!trimmed) {
-      setError("Enter a valid YouTube URL.");
+    if (!parsed) {
+      setError("Enter a valid YouTube or TikTok URL.");
       return;
     }
 
@@ -97,8 +99,8 @@ export default function ImportClipForm({
                 setError("");
               }
             }}
-            placeholder="YouTube URL"
-            aria-label="YouTube URL"
+            placeholder="Paste a YouTube or TikTok URL"
+            aria-label="YouTube or TikTok URL"
             className="h-10 min-w-0 flex-1 rounded-lg border border-[#262626] bg-[#141414] px-3 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-white/30"
           />
           <button

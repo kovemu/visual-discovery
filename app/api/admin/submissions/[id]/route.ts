@@ -3,6 +3,7 @@ import {
   NextResponse,
 } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isCreatorCategory } from "@/lib/creator/creatorCategories";
 import {
@@ -12,8 +13,18 @@ import {
 import {
   createImportedYouTubeWork,
   findYouTubeWork,
+  type ImportedWorkRow,
 } from "@/lib/picks/importYouTubeWork";
+import {
+  createImportedTikTokWork,
+  findTikTokWork,
+} from "@/lib/picks/importTikTokWork";
 import { parseSubmissionUrl } from "@/lib/submissions/parseSubmissionUrl";
+import {
+  asOptionalOEmbedString,
+  fetchTikTokOEmbed,
+} from "@/lib/tiktok/fetchTikTokOEmbed";
+import { resolveTikTokThumbnailUrl } from "@/lib/tiktok/resolveTikTokThumbnailUrl";
 import { isUuid } from "@/lib/validation/isUuid";
 import { fetchYouTubeVideoMeta } from "@/lib/youtube/fetchYouTubeVideo";
 
@@ -54,6 +65,261 @@ function parseSubmissionAction(
   }
 
   return null;
+}
+
+function resolvePendingSubmissionSource(
+  pending: {
+    source_url: string;
+    source_type: string;
+    source_id: string | null;
+  },
+) {
+  const parsed = parseSubmissionUrl(
+    pending.source_url,
+  );
+
+  if (parsed) {
+    return parsed;
+  }
+
+  if (
+    (pending.source_type === "youtube" ||
+      pending.source_type === "tiktok") &&
+    typeof pending.source_id === "string" &&
+    pending.source_id.trim() &&
+    pending.source_url.trim()
+  ) {
+    return {
+      source_type: pending.source_type,
+      source_url: pending.source_url.trim(),
+      source_id: pending.source_id.trim(),
+    };
+  }
+
+  return null;
+}
+
+const WORK_SELECT = `
+  id,
+  source,
+  source_id,
+  source_url,
+  title,
+  description,
+  thumbnail_url,
+  duration_seconds,
+  discover_eligible,
+  artist_id
+`;
+
+async function resolveWorkForApproval(
+  supabaseAdmin: SupabaseClient,
+  pending: {
+    source_url: string;
+    source_type: string;
+    source_id: string | null;
+    title: string | null;
+    description: string | null;
+    thumbnail_url: string | null;
+    duration_seconds: number | null;
+    work_id: number | string | null;
+  },
+): Promise<
+  | { ok: true; work: ImportedWorkRow }
+  | { ok: false; status: 400 | 500 }
+> {
+  const parsed = resolvePendingSubmissionSource(
+    pending,
+  );
+
+  if (!parsed) {
+    return { ok: false, status: 400 };
+  }
+
+  let work: ImportedWorkRow | null = null;
+
+  if (parsed.source_type === "youtube") {
+    const found = await findYouTubeWork(
+      supabaseAdmin,
+      parsed.source_id,
+    );
+
+    if (found.error) {
+      console.error(
+        "ADMIN SUBMISSION FIND WORK ERROR:",
+        found.error,
+      );
+      return { ok: false, status: 500 };
+    }
+
+    work = found.work;
+  } else if (parsed.source_type === "tiktok") {
+    const found = await findTikTokWork(
+      supabaseAdmin,
+      parsed.source_id,
+    );
+
+    if (found.error) {
+      console.error(
+        "ADMIN SUBMISSION FIND TIKTOK WORK ERROR:",
+        found.error,
+      );
+      return { ok: false, status: 500 };
+    }
+
+    work = found.work;
+  } else {
+    return { ok: false, status: 400 };
+  }
+
+  if (!work && pending.work_id) {
+    const { data, error } = await supabaseAdmin
+      .from("works")
+      .select(WORK_SELECT)
+      .eq("id", pending.work_id)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "ADMIN SUBMISSION LOAD WORK ERROR:",
+        error,
+      );
+      return { ok: false, status: 500 };
+    }
+
+    work = (data as ImportedWorkRow | null) ?? null;
+  }
+
+  if (!work && parsed.source_type === "youtube") {
+    const meta =
+      (await fetchYouTubeVideoMeta(
+        parsed.source_id,
+      )) ?? {
+        videoId: parsed.source_id,
+        title: pending.title,
+        description: pending.description,
+        thumbnailUrl: pending.thumbnail_url,
+        durationSeconds: pending.duration_seconds,
+        publishedAt: null,
+        canonicalUrl: parsed.source_url,
+      };
+
+    const created = await createImportedYouTubeWork(
+      supabaseAdmin,
+      meta,
+    );
+
+    if (!created.work) {
+      console.error(
+        "ADMIN SUBMISSION CREATE WORK ERROR:",
+        created.error,
+      );
+      return { ok: false, status: 500 };
+    }
+
+    work = created.work;
+  } else if (!work && parsed.source_type === "tiktok") {
+    const oembed = await fetchTikTokOEmbed(
+      parsed.source_url,
+    );
+
+    if (!oembed.ok) {
+      console.error(
+        "ADMIN SUBMISSION TIKTOK OEMBED ERROR:",
+        {
+          sourceId: parsed.source_id,
+          status: oembed.status,
+        },
+      );
+      return { ok: false, status: 500 };
+    }
+
+    const title =
+      asOptionalOEmbedString(oembed.data.title) ??
+      pending.title ??
+      `TikTok video ${parsed.source_id}`;
+    const thumbnailUrl =
+      await resolveTikTokThumbnailUrl({
+        videoId: parsed.source_id,
+        incomingThumbnail:
+          asOptionalOEmbedString(
+            oembed.data.thumbnail_url,
+          ),
+        existingThumbnail: null,
+      });
+
+    const created = await createImportedTikTokWork(
+      supabaseAdmin,
+      {
+        videoId: parsed.source_id,
+        canonicalUrl: parsed.source_url,
+        title,
+        description: pending.description ?? title,
+        thumbnailUrl,
+      },
+    );
+
+    if (!created.work) {
+      console.error(
+        "ADMIN SUBMISSION CREATE TIKTOK WORK ERROR:",
+        created.error,
+      );
+      return { ok: false, status: 500 };
+    }
+
+    work = created.work;
+  }
+
+  if (
+    work &&
+    parsed.source_type === "tiktok" &&
+    !work.thumbnail_url
+  ) {
+    const oembed = await fetchTikTokOEmbed(
+      parsed.source_url,
+    );
+
+    if (oembed.ok) {
+      const thumbnailUrl =
+        await resolveTikTokThumbnailUrl({
+          videoId: parsed.source_id,
+          incomingThumbnail:
+            asOptionalOEmbedString(
+              oembed.data.thumbnail_url,
+            ),
+          existingThumbnail: null,
+        });
+
+      if (thumbnailUrl) {
+        const { error: thumbnailError } =
+          await supabaseAdmin
+            .from("works")
+            .update({
+              thumbnail_url: thumbnailUrl,
+            })
+            .eq("id", work.id)
+            .eq("source", "tiktok");
+
+        if (thumbnailError) {
+          console.error(
+            "ADMIN SUBMISSION TIKTOK THUMBNAIL REPAIR ERROR:",
+            thumbnailError,
+          );
+        } else {
+          work = {
+            ...work,
+            thumbnail_url: thumbnailUrl,
+          };
+        }
+      }
+    }
+  }
+
+  if (!work) {
+    return { ok: false, status: 500 };
+  }
+
+  return { ok: true, work };
 }
 
 export async function PATCH(
@@ -299,143 +565,42 @@ export async function PATCH(
       | null;
 
     if (action === "approve") {
-      if (workId) {
-        const { error: eligibleError } =
-          await supabaseAdmin
-            .from("works")
-            .update({
-              discover_eligible: true,
-              discover_category: discoverCategory,
-            })
-            .eq("id", workId);
+      const resolved = await resolveWorkForApproval(
+        supabaseAdmin,
+        pending,
+      );
 
-        if (eligibleError) {
-          console.error(
-            "ADMIN SUBMISSION APPROVE WORK ERROR:",
-            eligibleError,
-          );
-
-          return NextResponse.json(
-            {
-              error:
-                "Failed to approve submission.",
-            },
-            { status: 500 },
-          );
-        }
-      } else {
-        const parsed = parseSubmissionUrl(
-          pending.source_url,
+      if (!resolved.ok) {
+        return NextResponse.json(
+          {
+            error:
+              "Failed to approve submission.",
+          },
+          { status: resolved.status },
         );
-
-        if (parsed?.source_type === "youtube") {
-          const meta =
-            (await fetchYouTubeVideoMeta(
-              parsed.source_id,
-            )) ?? {
-              videoId: parsed.source_id,
-              title: pending.title,
-              description: pending.description,
-              thumbnailUrl: pending.thumbnail_url,
-              durationSeconds:
-                pending.duration_seconds,
-              publishedAt: null,
-              canonicalUrl: parsed.source_url,
-            };
-
-          const found = await findYouTubeWork(
-            supabaseAdmin,
-            parsed.source_id,
-          );
-
-          if (found.error) {
-            console.error(
-              "ADMIN SUBMISSION FIND WORK ERROR:",
-              found.error,
-            );
-
-            return NextResponse.json(
-              {
-                error:
-                  "Failed to approve submission.",
-              },
-              { status: 500 },
-            );
-          }
-
-          if (found.work) {
-            workId = found.work.id;
-          } else {
-            const created =
-              await createImportedYouTubeWork(
-                supabaseAdmin,
-                meta,
-              );
-
-            if (!created.work) {
-              console.error(
-                "ADMIN SUBMISSION CREATE WORK ERROR:",
-                created.error,
-              );
-
-              return NextResponse.json(
-                {
-                  error:
-                    "Failed to approve submission.",
-                },
-                { status: 500 },
-              );
-            }
-
-            workId = created.work.id;
-          }
-
-          const { error: eligibleError } =
-            await supabaseAdmin
-              .from("works")
-              .update({
-                discover_eligible: true,
-                discover_category: discoverCategory,
-              })
-              .eq("id", workId);
-
-          if (eligibleError) {
-            console.error(
-              "ADMIN SUBMISSION APPROVE WORK ERROR:",
-              eligibleError,
-            );
-
-            return NextResponse.json(
-              {
-                error:
-                  "Failed to approve submission.",
-              },
-              { status: 500 },
-            );
-          }
-        }
       }
-    }
 
-    if (action === "reject" && workId) {
+      workId = resolved.work.id;
+
       const { error: eligibleError } =
         await supabaseAdmin
           .from("works")
           .update({
-            discover_eligible: false,
+            discover_eligible: true,
+            discover_category: discoverCategory,
           })
           .eq("id", workId);
 
       if (eligibleError) {
         console.error(
-          "ADMIN SUBMISSION REJECT WORK ERROR:",
+          "ADMIN SUBMISSION APPROVE WORK ERROR:",
           eligibleError,
         );
 
         return NextResponse.json(
           {
             error:
-              "Failed to reject submission.",
+              "Failed to approve submission.",
           },
           { status: 500 },
         );

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   adminAuthErrorResponse,
@@ -47,6 +48,90 @@ function resolveDiscoverCategory(
     : work;
 
   return row?.discover_category ?? null;
+}
+
+function buildWorkThumbnailKey(
+  source: string,
+  sourceId: string,
+) {
+  return `${source}:${sourceId}`;
+}
+
+async function loadWorkThumbnailMap(
+  supabaseAdmin: SupabaseClient,
+  rows: Array<{
+    source_type: string;
+    source_id: string | null;
+  }>,
+) {
+  const sourceIdsByType = new Map<
+    string,
+    Set<string>
+  >();
+
+  for (const row of rows) {
+    if (
+      typeof row.source_type !== "string" ||
+      typeof row.source_id !== "string" ||
+      !row.source_id.trim()
+    ) {
+      continue;
+    }
+
+    const ids =
+      sourceIdsByType.get(row.source_type) ??
+      new Set<string>();
+    ids.add(row.source_id.trim());
+    sourceIdsByType.set(row.source_type, ids);
+  }
+
+  const workThumbnailByKey = new Map<
+    string,
+    string | null
+  >();
+
+  await Promise.all(
+    [...sourceIdsByType.entries()].map(
+      async ([source, sourceIds]) => {
+        if (sourceIds.size === 0) {
+          return;
+        }
+
+        const { data, error } = await supabaseAdmin
+          .from("works")
+          .select("source, source_id, thumbnail_url")
+          .eq("source", source)
+          .in("source_id", [...sourceIds]);
+
+        if (error) {
+          console.error(
+            "ADMIN SUBMISSIONS WORK THUMBNAIL ERROR:",
+            { source, error },
+          );
+          return;
+        }
+
+        for (const work of data ?? []) {
+          if (
+            typeof work.source !== "string" ||
+            typeof work.source_id !== "string"
+          ) {
+            continue;
+          }
+
+          workThumbnailByKey.set(
+            buildWorkThumbnailKey(
+              work.source,
+              work.source_id,
+            ),
+            work.thumbnail_url,
+          );
+        }
+      },
+    ),
+  );
+
+  return workThumbnailByKey;
 }
 
 const ALLOWED_STATUSES = [
@@ -137,6 +222,12 @@ export async function GET(
     }
 
     const rows = data ?? [];
+    const workThumbnailByKey =
+      await loadWorkThumbnailMap(
+        supabaseAdmin,
+        rows,
+      );
+
     const submitterIds = [
       ...new Set(
         rows
@@ -170,8 +261,20 @@ export async function GET(
 
     return NextResponse.json({
       submissions: rows.map((row) => {
+        const workThumbnail =
+          row.source_type &&
+          row.source_id
+            ? workThumbnailByKey.get(
+                buildWorkThumbnailKey(
+                  row.source_type,
+                  row.source_id,
+                ),
+              ) ?? null
+            : null;
+
         const thumbnail =
           row.thumbnail_url ||
+          workThumbnail ||
           (row.source_type === "youtube"
             ? youtubeThumbnailUrl(
                 row.source_id,

@@ -6,6 +6,7 @@ import { createClient as createServiceClient } from "@supabase/supabase-js";
 
 import { isAnonymousUser } from "@/lib/auth/userKind";
 import { parseSubmissionUrl } from "@/lib/submissions/parseSubmissionUrl";
+import { resolveSubmissionUrlError } from "@/lib/submissions/submissionUrlErrors";
 import { createClient } from "@/lib/supabase/server";
 
 const supabaseUrl =
@@ -96,7 +97,12 @@ export async function POST(
 
     if (!parsed) {
       return NextResponse.json(
-        { error: "Invalid URL." },
+        {
+          error:
+            resolveSubmissionUrlError(
+              payload.source_url,
+            ) ?? "Invalid URL.",
+        },
         { status: 400 },
       );
     }
@@ -117,10 +123,8 @@ export async function POST(
       await supabaseAdmin
         .from("clip_submissions")
         .select("id")
-        .eq(
-          "source_url",
-          parsed.source_url,
-        )
+        .eq("source_type", parsed.source_type)
+        .eq("source_id", parsed.source_id)
         .in("status", [
           "pending",
           "approved",
@@ -146,6 +150,7 @@ export async function POST(
             parsed.source_url,
           source_type:
             parsed.source_type,
+          source_id: parsed.source_id,
           confirmed_18_plus: true,
           status: "pending",
         })

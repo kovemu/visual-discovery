@@ -95,12 +95,22 @@ export async function createImportedYouTubeWork(
   };
 }
 
+export type PendingClipSubmissionMeta = {
+  sourceType: "youtube" | "tiktok";
+  sourceId: string;
+  sourceUrl: string;
+  title: string | null;
+  description: string | null;
+  thumbnailUrl: string | null;
+  durationSeconds: number | null;
+};
+
 export async function ensurePendingClipSubmission(
   supabase: SupabaseClient,
   params: {
     userId: string;
     work: ImportedWorkRow;
-    meta: YouTubeVideoMeta;
+    meta: PendingClipSubmissionMeta;
   },
 ) {
   if (params.work.discover_eligible) {
@@ -110,16 +120,17 @@ export async function ensurePendingClipSubmission(
   const { data: existing, error: existingError } =
     await supabase
       .from("clip_submissions")
-      .select("id, status")
-      .eq("source_url", params.meta.canonicalUrl)
+      .select("id")
+      .eq("source_type", params.meta.sourceType)
+      .eq("source_id", params.meta.sourceId)
       .in("status", ["pending", "approved"])
-      .maybeSingle();
+      .limit(1);
 
   if (existingError) {
     return { error: existingError };
   }
 
-  if (existing) {
+  if (existing && existing.length > 0) {
     return { error: null };
   }
 
@@ -127,9 +138,9 @@ export async function ensurePendingClipSubmission(
     .from("clip_submissions")
     .insert({
       user_id: params.userId,
-      source_url: params.meta.canonicalUrl,
-      source_type: "youtube",
-      source_id: params.meta.videoId,
+      source_url: params.meta.sourceUrl,
+      source_type: params.meta.sourceType,
+      source_id: params.meta.sourceId,
       title: params.meta.title,
       description: params.meta.description,
       thumbnail_url: params.meta.thumbnailUrl,

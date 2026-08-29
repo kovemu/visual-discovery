@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 
 import { isAnonymousUser } from "@/lib/auth/userKind";
+import { resolveImportedTikTokWork } from "@/lib/picks/importTikTokWork";
 import {
   createImportedYouTubeWork,
   ensurePendingClipSubmission,
   findYouTubeWork,
+  type ImportedWorkRow,
 } from "@/lib/picks/importYouTubeWork";
 import { insertWorkPick } from "@/lib/picks/insertWorkPick";
 import { parseSubmissionUrl } from "@/lib/submissions/parseSubmissionUrl";
@@ -14,6 +16,9 @@ import { fetchYouTubeVideoMeta } from "@/lib/youtube/fetchYouTubeVideo";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const INVALID_URL_ERROR =
+  "Enter a valid YouTube or TikTok URL.";
 
 export async function POST(request: NextRequest) {
   try {
@@ -68,25 +73,16 @@ export async function POST(request: NextRequest) {
       !payload.source_url.trim()
     ) {
       return NextResponse.json(
-        { error: "Enter a valid YouTube URL." },
+        { error: INVALID_URL_ERROR },
         { status: 400 },
       );
     }
 
     const parsed = parseSubmissionUrl(payload.source_url);
 
-    if (!parsed || parsed.source_type !== "youtube") {
+    if (!parsed) {
       return NextResponse.json(
-        { error: "Enter a valid YouTube URL." },
-        { status: 400 },
-      );
-    }
-
-    const meta = await fetchYouTubeVideoMeta(parsed.source_id);
-
-    if (!meta) {
-      return NextResponse.json(
-        { error: "Could not load this YouTube video." },
+        { error: INVALID_URL_ERROR },
         { status: 400 },
       );
     }
@@ -102,46 +98,101 @@ export async function POST(request: NextRequest) {
       },
     );
 
-    let { work, error: findError } = await findYouTubeWork(
-      supabaseAdmin,
-      meta.videoId,
-    );
+    let work: ImportedWorkRow | null = null;
+    let fallbackTitle: string | null = null;
+    let fallbackDescription: string | null = null;
+    let fallbackImage: string | null = null;
 
-    if (findError) {
-      console.error("IMPORT FIND WORK ERROR:", findError);
-      return NextResponse.json(
-        { error: "Failed to import clip." },
-        { status: 500 },
+    if (parsed.source_type === "youtube") {
+      const meta = await fetchYouTubeVideoMeta(
+        parsed.source_id,
       );
-    }
 
-    if (!work) {
-      const created = await createImportedYouTubeWork(
+      if (!meta) {
+        return NextResponse.json(
+          { error: "Could not load this YouTube video." },
+          { status: 400 },
+        );
+      }
+
+      fallbackTitle = meta.title;
+      fallbackDescription = meta.description;
+      fallbackImage = meta.thumbnailUrl;
+
+      const found = await findYouTubeWork(
         supabaseAdmin,
-        meta,
+        meta.videoId,
       );
 
-      if (created.error) {
-        const retry = await findYouTubeWork(
+      if (found.error) {
+        console.error("IMPORT FIND WORK ERROR:", found.error);
+        return NextResponse.json(
+          { error: "Failed to import clip." },
+          { status: 500 },
+        );
+      }
+
+      work = found.work;
+
+      if (!work) {
+        const created = await createImportedYouTubeWork(
           supabaseAdmin,
-          meta.videoId,
+          meta,
         );
 
-        if (retry.work) {
-          work = retry.work;
+        if (created.error) {
+          const retry = await findYouTubeWork(
+            supabaseAdmin,
+            meta.videoId,
+          );
+
+          if (retry.work) {
+            work = retry.work;
+          } else {
+            console.error(
+              "IMPORT CREATE WORK ERROR:",
+              created.error,
+            );
+            return NextResponse.json(
+              { error: "Failed to import clip." },
+              { status: 500 },
+            );
+          }
         } else {
-          console.error(
-            "IMPORT CREATE WORK ERROR:",
-            created.error,
-          );
-          return NextResponse.json(
-            { error: "Failed to import clip." },
-            { status: 500 },
-          );
+          work = created.work;
         }
-      } else {
-        work = created.work;
       }
+    } else {
+      const resolved = await resolveImportedTikTokWork(
+        supabaseAdmin,
+        {
+          videoId: parsed.source_id,
+          canonicalUrl: parsed.source_url,
+        },
+      );
+
+      if (resolved.unavailable) {
+        return NextResponse.json(
+          { error: "Could not load this TikTok video." },
+          { status: 400 },
+        );
+      }
+
+      if (resolved.error) {
+        console.error(
+          "IMPORT TIKTOK WORK ERROR:",
+          resolved.error,
+        );
+        return NextResponse.json(
+          { error: "Failed to import clip." },
+          { status: 500 },
+        );
+      }
+
+      work = resolved.work;
+      fallbackTitle = work?.title ?? null;
+      fallbackDescription = work?.description ?? null;
+      fallbackImage = work?.thumbnail_url ?? null;
     }
 
     if (!work) {
@@ -170,7 +221,15 @@ export async function POST(request: NextRequest) {
       {
         userId: user.id,
         work,
-        meta,
+        meta: {
+          sourceType: parsed.source_type,
+          sourceId: parsed.source_id,
+          sourceUrl: parsed.source_url,
+          title: work.title ?? fallbackTitle,
+          description: work.description ?? fallbackDescription,
+          thumbnailUrl: work.thumbnail_url ?? fallbackImage,
+          durationSeconds: work.duration_seconds,
+        },
       },
     );
 
@@ -202,6 +261,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const isTikTok = work.source === "tiktok";
+
     return NextResponse.json(
       {
         work: {
@@ -209,12 +270,12 @@ export async function POST(request: NextRequest) {
           artistId: work.artist_id ?? "",
           artistName: "",
           source: work.source,
-          type: "youtube",
-          videoId: work.source_id ?? meta.videoId,
-          image: work.thumbnail_url ?? meta.thumbnailUrl,
+          type: isTikTok ? "tiktok" : "youtube",
+          videoId: work.source_id ?? parsed.source_id,
+          image: work.thumbnail_url ?? fallbackImage,
           sourceUrl: work.source_url,
-          title: work.title ?? meta.title,
-          description: work.description ?? meta.description,
+          title: work.title ?? fallbackTitle,
+          description: work.description ?? fallbackDescription,
         },
       },
       { status: 201 },
