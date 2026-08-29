@@ -21,7 +21,7 @@ import {
 
 const CAROUSEL_GAP = 12;
 const CARD_PORTRAIT_RATIO = 2.35;
-const PREFETCH_CARD_THRESHOLD = 2.5;
+const PREFETCH_CARD_THRESHOLD = 9;   ///다음 카드로딩 9개전
 const LEFT_BUFFER_CARDS = 5;
 const MIN_WINDOW_CARDS = 8;
 const WHEEL_MULTIPLIER = 1.85;
