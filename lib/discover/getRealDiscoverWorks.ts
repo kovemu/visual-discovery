@@ -123,22 +123,133 @@ export type DiscoverCandidateBatch = {
 
 
 
+const MAX_DISCOVER_SEARCH_TOKENS = 5;
+
+type DiscoverSearchTokenMatch = {
+  token: string;
+  creatorIds: string[];
+};
+
 export function normalizeDiscoverSearchQuery(
   query: string | null | undefined,
 ): string | null {
-  const trimmed = query?.trim() ?? "";
+  const collapsed = (query?.trim() ?? "").replace(
+    /\s+/g,
+    " ",
+  );
 
-  return trimmed.length > 0 ? trimmed : null;
+  if (collapsed.length === 0) {
+    return null;
+  }
+
+  return collapsed.normalize("NFKC");
 }
 
-function escapePostgrestIlikeValue(
+export function tokenizeDiscoverSearchQuery(
+  searchQuery: string | null,
+): string[] {
+  if (!searchQuery) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      searchQuery
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, MAX_DISCOVER_SEARCH_TOKENS);
+}
+
+function escapePostgrestIlikePattern(
   value: string,
 ): string {
   return value
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
-    .replace(/%/g, "\\%")
     .replace(/_/g, "\\_");
+}
+
+function buildDiscoverWorkSearchOrFilter(
+  token: string,
+  matchingCreatorIds: readonly string[],
+): string {
+  const pattern = `"*${escapePostgrestIlikePattern(token)}*"`;
+  const filters = [
+    `title.ilike.${pattern}`,
+    `description.ilike.${pattern}`,
+  ];
+
+  if (matchingCreatorIds.length > 0) {
+    const quotedIds = matchingCreatorIds
+      .map((id) => `"${id}"`)
+      .join(",");
+
+    filters.push(
+      `artist_id.in.(${quotedIds})`,
+    );
+  }
+
+  return filters.join(",");
+}
+
+async function resolveMatchingCreatorIdsForToken(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  token: string,
+): Promise<string[]> {
+  const pattern = `"*${escapePostgrestIlikePattern(token)}*"`;
+
+  const { data, error } = await supabase
+    .from("creators")
+    .select("id")
+    .or(
+      `name.ilike.${pattern},username.ilike.${pattern}`,
+    )
+    .limit(500);
+
+  if (error) {
+    console.log(
+      "DISCOVER CREATOR SEARCH ERROR:",
+      {
+        token,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      },
+    );
+
+    return [];
+  }
+
+  return (data ?? []).map((row) => row.id);
+}
+
+async function resolveDiscoverSearchTokenMatches(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  tokens: readonly string[],
+): Promise<DiscoverSearchTokenMatch[]> {
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const matches = await Promise.all(
+    tokens.map(async (token) => ({
+      token,
+      creatorIds:
+        await resolveMatchingCreatorIdsForToken(
+          supabase,
+          token,
+        ),
+    })),
+  );
+
+  return matches;
 }
 
 function applyDiscoverSearchFilter<
@@ -152,17 +263,24 @@ function applyDiscoverSearchFilter<
   },
 >(
   query: T,
-  searchQuery: string | null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
 ): T {
-  if (!searchQuery) {
+  if (tokenMatches.length === 0) {
     return query;
   }
 
-  const pattern = `%${escapePostgrestIlikeValue(searchQuery)}%`;
+  let nextQuery = query;
 
-  return query.or(
-    `title.ilike."${pattern}",description.ilike."${pattern}"`,
-  );
+  for (const match of tokenMatches) {
+    nextQuery = nextQuery.or(
+      buildDiscoverWorkSearchOrFilter(
+        match.token,
+        match.creatorIds,
+      ),
+    );
+  }
+
+  return nextQuery;
 }
 
 const DISCOVER_WORK_SELECT = `
@@ -346,7 +464,7 @@ async function countDiscoverWorksByWorkCategory(
     ReturnType<typeof createClient>
   >,
   categories: CreatorCategory[],
-  searchQuery: string | null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
 ) {
   let countQuery = supabase
     .from("works")
@@ -363,7 +481,7 @@ async function countDiscoverWorksByWorkCategory(
   );
   countQuery = applyDiscoverSearchFilter(
     countQuery,
-    searchQuery,
+    tokenMatches,
   );
 
   const { count, error } = await countQuery;
@@ -390,7 +508,7 @@ async function countDiscoverWorksByCreatorCategory(
     ReturnType<typeof createClient>
   >,
   categories: CreatorCategory[],
-  searchQuery: string | null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
 ) {
   let countQuery = supabase
     .from("works")
@@ -407,7 +525,7 @@ async function countDiscoverWorksByCreatorCategory(
   );
   countQuery = applyDiscoverSearchFilter(
     countQuery,
-    searchQuery,
+    tokenMatches,
   );
 
   const { count, error } = await countQuery;
@@ -434,7 +552,7 @@ async function fetchDiscoverWorksByWorkCategory(
     ReturnType<typeof createClient>
   >,
   categories: CreatorCategory[],
-  searchQuery: string | null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
   fetchThrough: number,
 ) {
   let worksQuery = supabase
@@ -449,7 +567,7 @@ async function fetchDiscoverWorksByWorkCategory(
   );
   worksQuery = applyDiscoverSearchFilter(
     worksQuery,
-    searchQuery,
+    tokenMatches,
   );
 
   const { data, error } = await worksQuery
@@ -484,7 +602,7 @@ async function fetchDiscoverWorksByCreatorCategory(
     ReturnType<typeof createClient>
   >,
   categories: CreatorCategory[],
-  searchQuery: string | null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
   fetchThrough: number,
 ) {
   let worksQuery = supabase
@@ -499,7 +617,7 @@ async function fetchDiscoverWorksByCreatorCategory(
   );
   worksQuery = applyDiscoverSearchFilter(
     worksQuery,
-    searchQuery,
+    tokenMatches,
   );
 
   const { data, error } = await worksQuery
@@ -844,7 +962,7 @@ async function getDiscoverableWorkCount(
 
   categories: CreatorCategory[] | null = null,
 
-  searchQuery: string | null = null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[] = [],
 
 ) {
 
@@ -863,7 +981,7 @@ async function getDiscoverableWorkCount(
 
     countQuery = applyDiscoverSearchFilter(
       countQuery,
-      searchQuery,
+      tokenMatches,
     );
 
     const { count, error } = await countQuery;
@@ -892,12 +1010,12 @@ async function getDiscoverableWorkCount(
     countDiscoverWorksByWorkCategory(
       supabase,
       dbCategories,
-      searchQuery,
+      tokenMatches,
     ),
     countDiscoverWorksByCreatorCategory(
       supabase,
       dbCategories,
-      searchQuery,
+      tokenMatches,
     ),
   ]);
 
@@ -934,6 +1052,18 @@ export async function getDiscoverCandidateBatch(
 
   const supabase = await createClient();
 
+  const searchTokens = tokenizeDiscoverSearchQuery(
+    normalizedSearch,
+  );
+
+  const tokenMatches =
+    searchTokens.length > 0
+      ? await resolveDiscoverSearchTokenMatches(
+          supabase,
+          searchTokens,
+        )
+      : [];
+
 
 
   const dbCategories =
@@ -947,7 +1077,7 @@ export async function getDiscoverCandidateBatch(
 
       categories,
 
-      normalizedSearch,
+      tokenMatches,
 
     );
 
@@ -989,13 +1119,13 @@ export async function getDiscoverCandidateBatch(
       fetchDiscoverWorksByWorkCategory(
         supabase,
         dbCategories,
-        normalizedSearch,
+        tokenMatches,
         to,
       ),
       fetchDiscoverWorksByCreatorCategory(
         supabase,
         dbCategories,
-        normalizedSearch,
+        tokenMatches,
         to,
       ),
     ]);
@@ -1013,7 +1143,7 @@ export async function getDiscoverCandidateBatch(
 
     worksQuery = applyDiscoverSearchFilter(
       worksQuery,
-      normalizedSearch,
+      tokenMatches,
     );
 
     const { data, error } =
