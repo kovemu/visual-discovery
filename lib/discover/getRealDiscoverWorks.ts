@@ -1268,3 +1268,46 @@ export async function getRealDiscoverWorks(): Promise<FeedItem[]> {
 
 }
 
+export async function getDiscoverWorkById(
+  workId: string,
+): Promise<FeedItem | null> {
+  const parsedId = Number(workId);
+
+  if (
+    !Number.isFinite(parsedId) ||
+    parsedId <= 0 ||
+    !Number.isInteger(parsedId)
+  ) {
+    return null;
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("works")
+    .select(DISCOVER_WORK_SELECT)
+    .eq("id", parsedId)
+    .eq("discover_eligible", true)
+    .maybeSingle();
+
+  if (error) {
+    console.log("LOAD DISCOVER WORK BY ID ERROR:", {
+      workId: parsedId,
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const row = data as unknown as WorkWithCreator;
+
+  if (!isDisplayableWork(row)) {
+    return null;
+  }
+
+  return mapWork(row, resolveCreator(row.artist));
+}
+
