@@ -1032,6 +1032,7 @@ setShorts(
 
   async function loadOlderShorts() {
     if (
+      loadingOlderShorts ||
       !channelUrl.trim() ||
       !channelNextPageToken
     ) {
@@ -1087,9 +1088,22 @@ setShorts(
         data.nextPageToken ?? null,
       );
 
-      setMessage(
-        `${incomingShorts.length + incomingVideos.length}개의 추가 영상을 불러왔습니다.`,
-      );
+      const addedCount =
+        incomingShorts.length +
+        incomingVideos.length;
+
+      if (addedCount > 0) {
+        setMessage(
+          `${addedCount}개의 추가 영상을 불러왔습니다.`,
+        );
+      }
+
+      if (
+        typeof data.warning ===
+        "string"
+      ) {
+        setError(data.warning);
+      }
     } catch (error) {
       if (
         error instanceof Error
@@ -1294,6 +1308,7 @@ setShorts(
 
   async function loadOlderFancams() {
     if (
+      loadingOlderFancams ||
       !selectedArtistId ||
       !fancamKeyword.trim() ||
       !fancamNextPageToken
@@ -1341,9 +1356,18 @@ setShorts(
         data.nextPageToken ?? null,
       );
 
-      setMessage(
-        `${loaded.length}개의 추가 Fancam 후보를 불러왔습니다.`,
-      );
+      if (loaded.length > 0) {
+        setMessage(
+          `${loaded.length}개의 추가 Fancam 후보를 불러왔습니다.`,
+        );
+      }
+
+      if (
+        typeof data.warning ===
+        "string"
+      ) {
+        setError(data.warning);
+      }
     } catch (error) {
       if (
         error instanceof Error

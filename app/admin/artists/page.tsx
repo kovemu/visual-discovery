@@ -66,6 +66,23 @@ function formatWorkCountLabel(
     : `${count} works`;
 }
 
+function formatTotalWorksLabel(
+  count: number,
+) {
+  const formatted =
+    count.toLocaleString();
+
+  return count === 1
+    ? "1 Work"
+    : `${formatted} Works`;
+}
+
+function getArtistWorkCount(
+  artist: ArtistRow,
+) {
+  return artist.works?.[0]?.count ?? 0;
+}
+
 function getCategoryFilterStyle(
   category: string,
   selected: boolean,
@@ -168,6 +185,13 @@ export default async function AdminArtistsPage({
             validCategory,
         );
 
+  const totalWorksCount =
+    filteredArtists.reduce(
+      (sum, artist) =>
+        sum + getArtistWorkCount(artist),
+      0,
+    );
+
   return (
     <main className="min-h-screen bg-zinc-50">
       <div className="mx-auto max-w-7xl px-6 py-12">
@@ -267,6 +291,12 @@ export default async function AdminArtistsPage({
               : `${formatCategory(
                   validCategory,
                 )} Artists`}
+            {" · "}
+            <span className="text-zinc-400">
+              {formatTotalWorksLabel(
+                totalWorksCount,
+              )}
+            </span>
           </p>
         </section>
 
@@ -285,8 +315,7 @@ export default async function AdminArtistsPage({
                   );
 
                 const workCount =
-                  artist.works?.[0]
-                    ?.count ?? 0;
+                  getArtistWorkCount(artist);
 
                 return (
                   <div

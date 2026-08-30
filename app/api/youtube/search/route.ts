@@ -20,6 +20,7 @@ const serviceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const MAX_SEARCH_RESULTS = 50;
+const LOAD_OLDER_MAX_PAGES = 4;
 
 const EXCLUDED_SEARCH_TERMS = [
   "-KBS",
@@ -201,6 +202,62 @@ async function searchFancamVideoIds(
       (data.nextPageToken as
         | string
         | undefined) ?? null,
+  };
+}
+
+async function searchFancamVideoIdsPaginated(
+  query: string,
+  options: {
+    startPageToken?: string;
+    maxPages: number;
+  },
+) {
+  const orderedIds: string[] = [];
+  const seen = new Set<string>();
+  let pageToken = options.startPageToken;
+  let nextPageToken: string | null = null;
+  let partialError: string | null = null;
+
+  for (
+    let page = 0;
+    page < options.maxPages;
+    page += 1
+  ) {
+    try {
+      const result =
+        await searchFancamVideoIds(
+          query,
+          pageToken,
+        );
+
+      for (const id of result.videoIds) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          orderedIds.push(id);
+        }
+      }
+
+      nextPageToken =
+        result.nextPageToken;
+
+      if (!nextPageToken) {
+        break;
+      }
+
+      pageToken = nextPageToken;
+    } catch (error) {
+      partialError =
+        error instanceof Error
+          ? error.message
+          : "Failed to search YouTube fancam videos.";
+      break;
+    }
+  }
+
+  return {
+    videoIds: orderedIds,
+    nextPageToken,
+    partialError,
   };
 }
 
@@ -433,13 +490,21 @@ export async function GET(
           )
         : searchQuery;
 
+    const isLoadOlder = Boolean(pageToken);
+
     const {
       videoIds,
       nextPageToken,
+      partialError,
     } =
-      await searchFancamVideoIds(
+      await searchFancamVideoIdsPaginated(
         searchQueryForApi,
-        pageToken,
+        {
+          startPageToken: pageToken,
+          maxPages: isLoadOlder
+            ? LOAD_OLDER_MAX_PAGES
+            : 1,
+        },
       );
 
     if (videoIds.length === 0) {
@@ -483,6 +548,9 @@ export async function GET(
     return NextResponse.json({
       works: filteredWorks,
       nextPageToken,
+      ...(partialError
+        ? { warning: partialError }
+        : {}),
     });
   } catch (error) {
     console.error(

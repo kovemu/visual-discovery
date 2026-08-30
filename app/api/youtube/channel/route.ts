@@ -13,6 +13,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const SHORTS_LIMIT_SECONDS = 150;
+const PLAYLIST_PAGE_SIZE = 50;
+const LOAD_OLDER_MAX_PAGES = 4;
 
 function parseChannelUrl(url: string) {
   try {
@@ -41,6 +43,90 @@ function parseChannelUrl(url: string) {
   } catch {
     return null;
   }
+}
+
+type PlaylistItem = {
+  contentDetails?: {
+    videoId?: string;
+    videoPublishedAt?: string;
+  };
+  snippet: {
+    title: string;
+    description: string;
+    publishedAt?: string;
+    thumbnails?: Record<
+      string,
+      { url?: string }
+    >;
+  };
+};
+
+async function fetchUploadsPlaylistItems(
+  uploadsPlaylistId: string,
+  options: {
+    startPageToken?: string;
+    maxPages: number;
+  },
+) {
+  const allItems: PlaylistItem[] = [];
+  let pageToken = options.startPageToken;
+  let nextPageToken: string | null = null;
+  let partialError: string | null = null;
+
+  for (
+    let page = 0;
+    page < options.maxPages;
+    page += 1
+  ) {
+    const playlistParams = new URLSearchParams({
+      part: "snippet,contentDetails",
+      playlistId: uploadsPlaylistId,
+      maxResults: String(PLAYLIST_PAGE_SIZE),
+      key: YOUTUBE_API_KEY!,
+    });
+
+    if (pageToken) {
+      playlistParams.set("pageToken", pageToken);
+    }
+
+    let playlistResponse: Response;
+
+    try {
+      playlistResponse = await fetch(
+        `https://www.googleapis.com/youtube/v3/playlistItems?${playlistParams}`,
+      );
+    } catch {
+      partialError =
+        "Failed to load YouTube videos.";
+      break;
+    }
+
+    if (!playlistResponse.ok) {
+      partialError =
+        "Failed to load YouTube videos.";
+      break;
+    }
+
+    const playlistData = await playlistResponse.json();
+    const items = (playlistData.items ??
+      []) as PlaylistItem[];
+
+    allItems.push(...items);
+    nextPageToken =
+      playlistData.nextPageToken ?? null;
+
+    if (!nextPageToken) {
+      break;
+    }
+
+    pageToken = nextPageToken;
+  }
+
+  return {
+    items: allItems,
+    nextPageToken,
+    partialError,
+  };
 }
 
 function parseDuration(duration: string) {
@@ -158,32 +244,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const playlistParams = new URLSearchParams({
-      part: "snippet,contentDetails",
-      playlistId: uploadsPlaylistId,
-      maxResults: "50",
-      key: YOUTUBE_API_KEY,
-    });
-
-    if (pageToken) {
-      playlistParams.set("pageToken", pageToken);
-    }
-
-    const playlistResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/playlistItems?${playlistParams}`
+    const isLoadOlder = Boolean(pageToken);
+    const {
+      items: playlistItems,
+      nextPageToken,
+      partialError,
+    } = await fetchUploadsPlaylistItems(
+      uploadsPlaylistId,
+      {
+        startPageToken: pageToken,
+        maxPages: isLoadOlder
+          ? LOAD_OLDER_MAX_PAGES
+          : 1,
+      },
     );
-
-    if (!playlistResponse.ok) {
-      return NextResponse.json(
-        { error: "Failed to load YouTube videos." },
-        { status: 500 }
-      );
-    }
-
-    const playlistData = await playlistResponse.json();
-    const playlistItems = playlistData.items ?? [];
-    const nextPageToken =
-      playlistData.nextPageToken ?? null;
 
     const videoIds = playlistItems
       .map((item: { contentDetails?: { videoId?: string } }) => item.contentDetails?.videoId)
@@ -238,21 +312,7 @@ export async function GET(request: NextRequest) {
     }
 
     const formattedVideos = playlistItems
-      .map((item: {
-        contentDetails?: {
-          videoId?: string;
-          videoPublishedAt?: string;
-        };
-        snippet: {
-          title: string;
-          description: string;
-          publishedAt?: string;
-          thumbnails?: Record<
-            string,
-            { url?: string }
-          >;
-        };
-      }) => {
+      .map((item: PlaylistItem) => {
         const videoId = item.contentDetails?.videoId;
         const detail = videoDetailMap.get(videoId ?? "");
 
@@ -279,7 +339,13 @@ export async function GET(request: NextRequest) {
           likeCount: detail.likeCount,
         };
       })
-      .filter(Boolean);
+      .filter(
+        (
+          video,
+        ): video is NonNullable<
+          typeof video
+        > => Boolean(video),
+      );
 
     const shorts = formattedVideos.filter(
       (video: { durationSeconds: number }) =>
@@ -343,6 +409,9 @@ export async function GET(request: NextRequest) {
       shorts: filteredShorts,
       videos: filteredVideos,
       nextPageToken,
+      ...(partialError
+        ? { warning: partialError }
+        : {}),
     });
   } catch (error) {
     console.error(error);
