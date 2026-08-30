@@ -17,6 +17,62 @@ const ALLOWED_EVENT_NAMES = new Set<string>(
   PRODUCT_EVENT_NAMES,
 );
 
+const ANALYTICS_CATEGORY_VALUES = new Set([
+  "all",
+  "cheer",
+  "kpop",
+  "look",
+]);
+
+function sanitizeAnalyticsCategoryValue(
+  value: unknown,
+) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim().toLowerCase();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed === "all") {
+    return "all";
+  }
+
+  const parts = trimmed
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (
+    parts.length === 0 ||
+    parts.some(
+      (part) =>
+        !ANALYTICS_CATEGORY_VALUES.has(part) ||
+        part === "all",
+    )
+  ) {
+    return null;
+  }
+
+  return parts.join(",");
+}
+
+function sanitizeSearchQuery(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 100);
+
+  return normalized || null;
+}
+
 function isValidSessionId(value: unknown) {
   return (
     typeof value === "string" &&
@@ -189,6 +245,36 @@ function sanitizeMetadata(
     }
 
     return sanitized;
+  }
+
+  if (eventName === "filter_change") {
+    const from =
+      sanitizeAnalyticsCategoryValue(raw.from);
+    const to =
+      sanitizeAnalyticsCategoryValue(raw.to);
+
+    if (from && to && from !== to) {
+      return { from, to };
+    }
+
+    return {};
+  }
+
+  if (eventName === "search") {
+    const query = sanitizeSearchQuery(raw.query);
+    const category =
+      sanitizeAnalyticsCategoryValue(
+        raw.category,
+      );
+
+    if (query && category) {
+      return {
+        query,
+        category,
+      };
+    }
+
+    return {};
   }
 
   return {};

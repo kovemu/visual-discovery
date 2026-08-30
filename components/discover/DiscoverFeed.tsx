@@ -54,6 +54,17 @@ type DiscoverFeedProps = {
 };
 
 const DISCOVER_SEARCH_DEBOUNCE_MS = 300;
+const DISCOVER_SEARCH_ANALYTICS_DEBOUNCE_MS = 800;
+const DISCOVER_SEARCH_QUERY_MAX_LENGTH = 100;
+
+function normalizeDiscoverSearchQueryForAnalytics(
+  value: string,
+) {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, DISCOVER_SEARCH_QUERY_MAX_LENGTH);
+}
 
 export default function DiscoverFeed({
   works: _initialWorks,
@@ -76,6 +87,13 @@ export default function DiscoverFeed({
       ),
     [selectedCategories],
   );
+
+  const categorySignatureRef = useRef(
+    categorySignature,
+  );
+  const lastSearchEventKeyRef = useRef<
+    string | null
+  >(null);
 
   const isAllActive = isAllDiscoverCategoriesSelected(
     selectedCategories,
@@ -102,6 +120,54 @@ export default function DiscoverFeed({
       window.clearTimeout(timer);
     };
   }, [searchInput]);
+
+  useEffect(() => {
+    const normalizedQuery =
+      normalizeDiscoverSearchQueryForAnalytics(
+        searchInput,
+      );
+
+    if (!normalizedQuery) {
+      lastSearchEventKeyRef.current = null;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const settledQuery =
+        normalizeDiscoverSearchQueryForAnalytics(
+          searchInput,
+        );
+
+      if (!settledQuery) {
+        lastSearchEventKeyRef.current = null;
+        return;
+      }
+
+      const dedupeKey = `${categorySignature}:${settledQuery}`;
+
+      if (
+        lastSearchEventKeyRef.current ===
+        dedupeKey
+      ) {
+        return;
+      }
+
+      lastSearchEventKeyRef.current =
+        dedupeKey;
+
+      trackProductEvent({
+        event_name: "search",
+        metadata: {
+          query: settledQuery,
+          category: categorySignature,
+        },
+      });
+    }, DISCOVER_SEARCH_ANALYTICS_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [searchInput, categorySignature]);
 
   const feed = useDiscoverFeed(
     categorySignature,
@@ -156,6 +222,36 @@ export default function DiscoverFeed({
       metadata,
     });
   }, [feed.isLoading, feed.works.length]);
+
+  function applyCategorySelection(
+    nextCategories: Set<CreatorCategory>,
+  ) {
+    const nextSignature =
+      buildDiscoverCategorySignature(
+        nextCategories,
+      );
+    const previousSignature =
+      categorySignatureRef.current;
+
+    setSelectedCategories(nextCategories);
+
+    if (
+      nextSignature === previousSignature
+    ) {
+      return;
+    }
+
+    categorySignatureRef.current =
+      nextSignature;
+
+    trackProductEvent({
+      event_name: "filter_change",
+      metadata: {
+        from: previousSignature,
+        to: nextSignature,
+      },
+    });
+  }
 
   const categoryButtonClass = (isActive: boolean) =>
     `h-[30px] rounded border px-4 text-[10px] font-semibold uppercase tracking-[0.08em] transition ${
@@ -424,7 +520,7 @@ export default function DiscoverFeed({
           <button
             type="button"
             onClick={() =>
-              setSelectedCategories(
+              applyCategorySelection(
                 handleAllCategoryClick(
                   selectedCategories,
                 ),
@@ -447,12 +543,11 @@ export default function DiscoverFeed({
                 key={tab.value}
                 type="button"
                 onClick={() =>
-                  setSelectedCategories(
-                    (current) =>
-                      handleCreatorCategoryClick(
-                        current,
-                        tab.value,
-                      ),
+                  applyCategorySelection(
+                    handleCreatorCategoryClick(
+                      selectedCategories,
+                      tab.value,
+                    ),
                   )
                 }
                 className={categoryButtonClass(
