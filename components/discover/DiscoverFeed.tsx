@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import SavedPanel, {
   type SavedPanelWork,
@@ -109,6 +109,53 @@ export default function DiscoverFeed({
     picksLoaded,
     debouncedSearch,
   );
+
+  const discoverViewTrackedRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      discoverViewTrackedRef.current ||
+      feed.isLoading ||
+      feed.works.length === 0
+    ) {
+      return;
+    }
+
+    discoverViewTrackedRef.current = true;
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const deviceType =
+      viewportWidth < 768
+        ? "mobile"
+        : viewportWidth < 1024
+          ? "tablet"
+          : "desktop";
+
+    const metadata: Record<string, string | number> = {
+      path: window.location.pathname,
+      device_type: deviceType,
+      viewport_width: viewportWidth,
+      viewport_height: viewportHeight,
+    };
+
+    if (document.referrer) {
+      metadata.referrer = document.referrer;
+    }
+
+    const utmSource = new URLSearchParams(
+      window.location.search,
+    ).get("utm_source");
+
+    if (utmSource) {
+      metadata.utm_source = utmSource;
+    }
+
+    trackProductEvent({
+      event_name: "discover_view",
+      metadata,
+    });
+  }, [feed.isLoading, feed.works.length]);
 
   const categoryButtonClass = (isActive: boolean) =>
     `h-[30px] rounded border px-4 text-[10px] font-semibold uppercase tracking-[0.08em] transition ${
@@ -370,9 +417,7 @@ export default function DiscoverFeed({
               Discover
             </h1>
           </div>
-          <p className="mt-1.5 pl-3 text-[11px] font-normal text-white/[0.38]">
-            Curated clips. Effortless discovery.
-          </p>
+          <div className="h-5" aria-hidden="true" />
         </div>
 
         <div className="mb-5 flex flex-wrap items-center gap-[11px] md:mb-6">
@@ -429,8 +474,7 @@ export default function DiscoverFeed({
             }
             placeholder="Search clips"
             aria-label="Search clips"
-            className="ml-2 h-8 min-w-[140px] flex-1 rounded border border-white/12 bg-white/[0.04] px-2.5 text-[10px] text-white outline-none transition placeholder:text-white/[0.32] focus:border-white/25 sm:max-w-[180px] sm:flex-none md:text-[11px]"
-          />
+            className="ml-0 h-8 min-w-[140px] flex-1 rounded border border-white/12 bg-white/[0.04] px-2.5 text-[10px] text-white outline-none transition placeholder:text-white/[0.32] focus:border-white/25 sm:max-w-[180px] sm:flex-none md:ml-2 md:text-[11px]"          />
         </div>
 
         {pickError ? (

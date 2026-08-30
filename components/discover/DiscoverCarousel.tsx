@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type RefObject,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -25,6 +26,8 @@ const PREFETCH_CARD_THRESHOLD = 9;   ///다음 카드로딩 9개전
 const LEFT_BUFFER_CARDS = 5;
 const MIN_WINDOW_CARDS = 8;
 const WHEEL_MULTIPLIER = 1.85;
+const WHEEL_LERP_FACTOR = 0.28;
+const WHEEL_SCROLL_SNAP_EPS = 0.5;
 const DRAG_MULTIPLIER = 1.28;
 const DRAG_THRESHOLD_PX = 8;
 const SCROLL_EDGE_EPS = 2;
@@ -81,6 +84,174 @@ function getCarouselCardWidth(
   );
 }
 
+const ARROW_SCROLL_CARD_COUNT = 3;
+const ARROW_APPEND_MAX_ATTEMPTS = 3;
+const ARROW_SCROLL_TIMEOUT_MS = 900;
+const ARROW_FEED_GROW_TIMEOUT_MS = 10000;
+
+function getArrowScrollDistance(
+  track: HTMLDivElement,
+  fallbackStride: number,
+): number {
+  const cards = track.querySelectorAll<HTMLElement>(
+    "[data-carousel-card]",
+  );
+
+  if (cards.length === 0) {
+    return fallbackStride * ARROW_SCROLL_CARD_COUNT;
+  }
+
+  const firstCard = cards[0];
+  const cardWidthActual =
+    firstCard.getBoundingClientRect().width;
+
+  let gap = CAROUSEL_GAP;
+
+  if (cards.length > 1) {
+    const secondCard = cards[1];
+    const measuredGap =
+      secondCard.offsetLeft -
+      firstCard.offsetLeft -
+      firstCard.offsetWidth;
+
+    if (
+      Number.isFinite(measuredGap) &&
+      measuredGap >= 0
+    ) {
+      gap = measuredGap;
+    }
+  }
+
+  return (
+    (cardWidthActual + gap) *
+    ARROW_SCROLL_CARD_COUNT
+  );
+}
+
+function getTrackMaxScrollLeft(
+  track: HTMLDivElement,
+) {
+  return Math.max(
+    0,
+    track.scrollWidth - track.clientWidth,
+  );
+}
+
+function needsRightArrowRoom(
+  track: HTMLDivElement,
+  distance: number,
+) {
+  return (
+    track.scrollLeft + distance >
+    getTrackMaxScrollLeft(track) +
+      SCROLL_EDGE_EPS
+  );
+}
+
+function waitForNextFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      resolve();
+    });
+  });
+}
+
+function waitForLoadingComplete(
+  isLoadingMoreRef: RefObject<boolean>,
+) {
+  return new Promise<void>((resolve) => {
+    const startedAt = Date.now();
+
+    const check = () => {
+      if (
+        !isLoadingMoreRef.current ||
+        Date.now() - startedAt >=
+          ARROW_FEED_GROW_TIMEOUT_MS
+      ) {
+        resolve();
+        return;
+      }
+
+      requestAnimationFrame(check);
+    };
+
+    requestAnimationFrame(check);
+  });
+}
+
+function waitForFeedGrowth(
+  track: HTMLDivElement,
+  previousScrollWidth: number,
+  previousWorksLength: number,
+  worksRef: RefObject<FeedItem[]>,
+) {
+  return new Promise<void>((resolve) => {
+    const startedAt = Date.now();
+
+    const check = () => {
+      const grew =
+        track.scrollWidth >
+          previousScrollWidth +
+            SCROLL_EDGE_EPS ||
+        worksRef.current.length >
+          previousWorksLength;
+
+      if (
+        grew ||
+        Date.now() - startedAt >=
+          ARROW_FEED_GROW_TIMEOUT_MS
+      ) {
+        void waitForNextFrame().then(resolve);
+        return;
+      }
+
+      requestAnimationFrame(check);
+    };
+
+    requestAnimationFrame(check);
+  });
+}
+
+function smoothScrollTo(
+  track: HTMLDivElement,
+  left: number,
+) {
+  return new Promise<void>((resolve) => {
+    const targetLeft = Math.max(0, left);
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      track.removeEventListener(
+        "scrollend",
+        finish,
+      );
+      window.clearTimeout(fallbackTimer);
+      resolve();
+    };
+
+    track.addEventListener(
+      "scrollend",
+      finish,
+      { once: true },
+    );
+
+    const fallbackTimer = window.setTimeout(
+      finish,
+      ARROW_SCROLL_TIMEOUT_MS,
+    );
+
+    track.scrollTo({
+      left: targetLeft,
+      behavior: "smooth",
+    });
+  });
+}
+
 export default function DiscoverCarousel({
   works,
   pickedWorkIds,
@@ -119,7 +290,88 @@ export default function DiscoverCarousel({
     setCanScrollRight,
   ] = useState(true);
 
+  const suppressPruneRef = useRef(false);
+  const arrowScrollInProgressRef = useRef(false);
+  const onNearEndRef = useRef(onNearEnd);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const targetScrollLeftRef = useRef(0);
+  const wheelRafRef = useRef<number | null>(null);
+  const tickWheelSmoothingRef = useRef<() => void>(
+    () => {},
+  );
+
+  onNearEndRef.current = onNearEnd;
+  isLoadingMoreRef.current = isLoadingMore;
+
   worksRef.current = works;
+
+  const cancelWheelSmoothing = useCallback(() => {
+    if (wheelRafRef.current !== null) {
+      cancelAnimationFrame(wheelRafRef.current);
+      wheelRafRef.current = null;
+    }
+
+    const track = trackRef.current;
+
+    if (track) {
+      targetScrollLeftRef.current =
+        track.scrollLeft;
+    }
+  }, []);
+
+  tickWheelSmoothingRef.current = () => {
+    const track = trackRef.current;
+
+    if (!track) {
+      wheelRafRef.current = null;
+      return;
+    }
+
+    const maxScrollLeft =
+      getTrackMaxScrollLeft(track);
+    targetScrollLeftRef.current = Math.max(
+      0,
+      Math.min(
+        targetScrollLeftRef.current,
+        maxScrollLeft,
+      ),
+    );
+
+    const current = track.scrollLeft;
+    const target =
+      targetScrollLeftRef.current;
+    const diff = target - current;
+
+    if (
+      Math.abs(diff) <= WHEEL_SCROLL_SNAP_EPS
+    ) {
+      if (current !== target) {
+        track.scrollLeft = target;
+      }
+
+      wheelRafRef.current = null;
+      return;
+    }
+
+    track.scrollLeft =
+      current + diff * WHEEL_LERP_FACTOR;
+    wheelRafRef.current =
+      requestAnimationFrame(() => {
+        tickWheelSmoothingRef.current();
+      });
+  };
+
+  const scheduleWheelSmoothing =
+    useCallback(() => {
+      if (wheelRafRef.current !== null) {
+        return;
+      }
+
+      wheelRafRef.current =
+        requestAnimationFrame(() => {
+          tickWheelSmoothingRef.current();
+        });
+    }, []);
 
   const cardWidth =
     trackWidth > 0
@@ -129,9 +381,6 @@ export default function DiscoverCarousel({
   const cardHeight =
     cardWidth * CARD_PORTRAIT_RATIO;
   const viewportHeight = cardHeight;
-
-  const scrollStep =
-    (cardWidth + CAROUSEL_GAP) * 2.5;
 
   const updateArrowState =
     useCallback(() => {
@@ -210,16 +459,14 @@ export default function DiscoverCarousel({
         return;
       }
 
-      const maxScrollLeft = Math.max(
-        0,
-        track.scrollWidth -
-          track.clientWidth,
-      );
+      const maxScrollLeft =
+        getTrackMaxScrollLeft(track);
+      const scrollPos =
+        targetScrollLeftRef.current;
       const canScrollLeftNow =
-        track.scrollLeft >
-        SCROLL_EDGE_EPS;
+        scrollPos > SCROLL_EDGE_EPS;
       const canScrollRightNow =
-        track.scrollLeft <
+        scrollPos <
         maxScrollLeft - SCROLL_EDGE_EPS;
       const scrollingRight =
         event.deltaY > 0;
@@ -250,9 +497,19 @@ export default function DiscoverCarousel({
         delta *= track.clientWidth;
       }
 
-      track.scrollLeft +=
-        delta * WHEEL_MULTIPLIER;
+      targetScrollLeftRef.current = Math.max(
+        0,
+        Math.min(
+          targetScrollLeftRef.current +
+            delta * WHEEL_MULTIPLIER,
+          maxScrollLeft,
+        ),
+      );
+      scheduleWheelSmoothing();
     };
+
+    targetScrollLeftRef.current =
+      track.scrollLeft;
 
     track.addEventListener(
       "wheel",
@@ -265,8 +522,14 @@ export default function DiscoverCarousel({
         "wheel",
         onWheel,
       );
+      cancelWheelSmoothing();
     };
-  }, [isLoading, works.length]);
+  }, [
+    isLoading,
+    works.length,
+    scheduleWheelSmoothing,
+    cancelWheelSmoothing,
+  ]);
 
   useEffect(() => {
     const track = trackRef.current;
@@ -293,7 +556,9 @@ export default function DiscoverCarousel({
       if (
         !onPrune ||
         dragRef.current.active ||
-        cardWidth <= 0
+        cardWidth <= 0 ||
+        suppressPruneRef.current ||
+        arrowScrollInProgressRef.current
       ) {
         return;
       }
@@ -387,22 +652,139 @@ export default function DiscoverCarousel({
       track.scrollLeft - adjust,
     );
     pendingScrollAdjustRef.current = 0;
+
+    if (wheelRafRef.current !== null) {
+      cancelAnimationFrame(wheelRafRef.current);
+      wheelRafRef.current = null;
+    }
+
+    targetScrollLeftRef.current =
+      track.scrollLeft;
     updateArrowState();
   }, [works, updateArrowState]);
+
+  const ensureRightArrowScrollRoom =
+    useCallback(
+      async (
+        track: HTMLDivElement,
+        fallbackStride: number,
+      ) => {
+        if (!onNearEndRef.current) {
+          return;
+        }
+
+        for (
+          let attempt = 0;
+          attempt < ARROW_APPEND_MAX_ATTEMPTS;
+          attempt += 1
+        ) {
+          const distance =
+            getArrowScrollDistance(
+              track,
+              fallbackStride,
+            );
+
+          if (
+            !needsRightArrowRoom(
+              track,
+              distance,
+            )
+          ) {
+            return;
+          }
+
+          if (isLoadingMoreRef.current) {
+            await waitForLoadingComplete(
+              isLoadingMoreRef,
+            );
+            continue;
+          }
+
+          const previousScrollWidth =
+            track.scrollWidth;
+          const previousWorksLength =
+            worksRef.current.length;
+
+          onNearEndRef.current();
+
+          await waitForFeedGrowth(
+            track,
+            previousScrollWidth,
+            previousWorksLength,
+            worksRef,
+          );
+        }
+      },
+      [],
+    );
+
+  const executeArrowScroll = useCallback(
+    async (direction: 1 | -1) => {
+      if (arrowScrollInProgressRef.current) {
+        return;
+      }
+
+      const track = trackRef.current;
+
+      if (!track) {
+        return;
+      }
+
+      cancelWheelSmoothing();
+      arrowScrollInProgressRef.current = true;
+      suppressPruneRef.current = true;
+
+      try {
+        const fallbackStride =
+          cardWidth + CAROUSEL_GAP;
+
+        if (direction === 1) {
+          await ensureRightArrowScrollRoom(
+            track,
+            fallbackStride,
+          );
+        }
+
+        const distance =
+          getArrowScrollDistance(
+            track,
+            fallbackStride,
+          );
+        const maxScrollLeft =
+          getTrackMaxScrollLeft(track);
+        const target = Math.max(
+          0,
+          Math.min(
+            track.scrollLeft +
+              distance * direction,
+            maxScrollLeft,
+          ),
+        );
+
+        await smoothScrollTo(track, target);
+      } finally {
+        arrowScrollInProgressRef.current = false;
+        suppressPruneRef.current = false;
+        updateArrowState();
+        requestAnimationFrame(() => {
+          trackRef.current?.dispatchEvent(
+            new Event("scroll"),
+          );
+        });
+      }
+    },
+    [
+      cardWidth,
+      cancelWheelSmoothing,
+      ensureRightArrowScrollRoom,
+      updateArrowState,
+    ],
+  );
 
   function scrollByCards(
     direction: 1 | -1,
   ) {
-    const track = trackRef.current;
-
-    if (!track) {
-      return;
-    }
-
-    track.scrollBy({
-      left: scrollStep * direction,
-      behavior: "smooth",
-    });
+    void executeArrowScroll(direction);
   }
 
   function onTrackPointerDown(
@@ -424,6 +806,8 @@ export default function DiscoverCarousel({
     if (!track) {
       return;
     }
+
+    cancelWheelSmoothing();
 
     dragRef.current = {
       active: true,
@@ -535,6 +919,7 @@ export default function DiscoverCarousel({
       <div
         key={work.id}
         data-feed-index={feedIndex}
+        data-carousel-card=""
         className="shrink-0"
         style={{
           width: cardWidth,

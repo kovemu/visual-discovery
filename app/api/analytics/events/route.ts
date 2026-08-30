@@ -134,6 +134,63 @@ function sanitizeMetadata(
     return sanitized;
   }
 
+  if (eventName === "discover_view") {
+    const sanitized: Record<string, string | number> = {};
+
+    if (
+      typeof raw.path === "string" &&
+      raw.path.length <= 256
+    ) {
+      sanitized.path = raw.path;
+    }
+
+    if (
+      typeof raw.referrer === "string" &&
+      raw.referrer.length <= 2048
+    ) {
+      sanitized.referrer = raw.referrer;
+    }
+
+    if (
+      typeof raw.utm_source === "string" &&
+      raw.utm_source.length <= 128
+    ) {
+      sanitized.utm_source = raw.utm_source;
+    }
+
+    if (
+      raw.device_type === "mobile" ||
+      raw.device_type === "tablet" ||
+      raw.device_type === "desktop"
+    ) {
+      sanitized.device_type = raw.device_type;
+    }
+
+    if (
+      typeof raw.viewport_width === "number" &&
+      Number.isFinite(raw.viewport_width) &&
+      raw.viewport_width >= 1 &&
+      raw.viewport_width <= 10000
+    ) {
+      sanitized.viewport_width = Math.round(
+        raw.viewport_width,
+      );
+    }
+
+    if (
+      typeof raw.viewport_height === "number" &&
+      Number.isFinite(raw.viewport_height) &&
+      raw.viewport_height >= 1 &&
+      raw.viewport_height <= 10000
+    ) {
+      sanitized.viewport_height = Math.round(
+        raw.viewport_height,
+      );
+    }
+
+    return sanitized;
+  }
+
   return {};
 }
 

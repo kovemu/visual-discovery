@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
 import { extractInstagramUrl } from "@/lib/youtube/extractInstagramUrl";
+import {
+  excludeExistingYouTubeVideos,
+  getExistingYouTubeSourceIds,
+} from "@/lib/youtube/excludeExistingYouTubeVideos";
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const SHORTS_LIMIT_SECONDS = 150;
 
@@ -76,6 +83,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { error: "YOUTUBE_API_KEY is not configured." },
         { status: 500 }
+      );
+    }
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        { error: "Supabase server configuration is missing." },
+        { status: 500 },
       );
     }
 
@@ -277,6 +291,35 @@ export async function GET(request: NextRequest) {
         video.durationSeconds > SHORTS_LIMIT_SECONDS
     );
 
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      },
+    );
+
+    const existingSourceIds =
+      await getExistingYouTubeSourceIds(
+        supabaseAdmin,
+        formattedVideos.map(
+          (video: { id: string }) => video.id,
+        ),
+      );
+
+    const filteredShorts = excludeExistingYouTubeVideos(
+      shorts,
+      existingSourceIds,
+    );
+
+    const filteredVideos = excludeExistingYouTubeVideos(
+      videos,
+      existingSourceIds,
+    );
+
     const channelDescription =
       channel.snippet.description ?? "";
 
@@ -297,8 +340,8 @@ export async function GET(request: NextRequest) {
           ),
       },
 
-      shorts,
-      videos,
+      shorts: filteredShorts,
+      videos: filteredVideos,
       nextPageToken,
     });
   } catch (error) {

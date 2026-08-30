@@ -6,6 +6,9 @@ import {
 import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+import {
+  filterOutExistingYouTubeVideos,
+} from "@/lib/youtube/excludeExistingYouTubeVideos";
 
 const YOUTUBE_API_KEY =
   process.env.YOUTUBE_API_KEY;
@@ -471,8 +474,14 @@ export async function GET(
         return true;
       });
 
+    const filteredWorks =
+      await filterOutExistingYouTubeVideos(
+        supabaseAdmin,
+        works,
+      );
+
     return NextResponse.json({
-      works,
+      works: filteredWorks,
       nextPageToken,
     });
   } catch (error) {

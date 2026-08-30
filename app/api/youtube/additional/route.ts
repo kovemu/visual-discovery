@@ -2,11 +2,19 @@ import {
   NextRequest,
   NextResponse,
 } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+import {
+  filterOutExistingYouTubeVideos,
+} from "@/lib/youtube/excludeExistingYouTubeVideos";
 
 const YOUTUBE_API_KEY =
   process.env.YOUTUBE_API_KEY;
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceRoleKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const MAX_PLAYLIST_ITEMS = 200;
 
@@ -407,6 +415,18 @@ export async function GET(
       );
     }
 
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        {
+          error:
+            "Supabase server configuration is missing.",
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
     const url =
       request.nextUrl.searchParams.get(
         "url",
@@ -448,9 +468,26 @@ export async function GET(
             parsed.id,
           );
 
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      },
+    );
+
+    const filteredWorks =
+      await filterOutExistingYouTubeVideos(
+        supabaseAdmin,
+        works,
+      );
+
     return NextResponse.json({
       type: parsed.type,
-      works,
+      works: filteredWorks,
     });
   } catch (error) {
     console.error(
