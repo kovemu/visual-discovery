@@ -180,6 +180,10 @@ export async function generateMetadata({
   if (!creator) {
     return {
       title: "Artist | Kovemu",
+      robots: {
+        index: false,
+        follow: true,
+      },
     };
   }
 
@@ -195,6 +199,10 @@ export async function generateMetadata({
   return {
     title,
     description,
+    robots: {
+      index: false,
+      follow: true,
+    },
     openGraph: {
       title,
       description,

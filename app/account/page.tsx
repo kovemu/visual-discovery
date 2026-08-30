@@ -1,8 +1,16 @@
 import Header from "@/components/Header";
 import { isRealAccountUser } from "@/lib/auth/userKind";
 import { createClient } from "@/lib/supabase/server";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import ProfileEditor from "@/components/account/ProfileEditor";
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: true,
+  },
+};
 
 export default async function AccountPage() {
   const supabase = await createClient();

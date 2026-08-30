@@ -18,14 +18,16 @@ const SITE_TITLE =
 const SITE_DESCRIPTION =
   "Discover visual clips through a simple browse, save, and next flow.";
 
+const SITE_URL = "https://kovemu.com";
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://visual-discovery.local"),
+  metadataBase: new URL(SITE_URL),
   title: SITE_TITLE,
   description: SITE_DESCRIPTION,
   openGraph: {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    url: "https://visual-discovery.local",
+    url: SITE_URL,
     siteName: "KOVEMU",
     type: "website",
   },
