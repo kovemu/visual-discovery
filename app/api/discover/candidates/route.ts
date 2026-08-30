@@ -3,8 +3,6 @@ import {
   NextResponse,
 } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
-
 import { parseDiscoverTypesParam } from "@/lib/discover/discoverTypes";
 import {
   parseDiscoverCategoriesParam,
@@ -15,10 +13,9 @@ import {
 import type { CreatorCategory } from "@/lib/creator/creatorCategories";
 import {
   getDiscoverCandidateBatch,
+  getDiscoverCandidatePageCount,
   normalizeDiscoverSearchQuery,
 } from "@/lib/discover/getRealDiscoverWorks";
-
-const WORKS_PER_BATCH = 36;
 
 function resolveDiscoverCategories(
   request: NextRequest,
@@ -100,46 +97,6 @@ function computeVirtualRound(
   );
 }
 
-async function getWorkPageCount() {
-  const supabase =
-    await createClient();
-
-  const {
-    count,
-    error,
-  } = await supabase
-    .from("works")
-    .select("id", {
-      count: "exact",
-      head: true,
-    })
-    .eq("featured", false)
-    .eq("discover_eligible", true);
-
-  if (error) {
-    console.log(
-      "LOAD DISCOVER WORK PAGE COUNT ERROR:",
-      {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      },
-    );
-
-    return 1;
-  }
-
-  const workCount = count ?? 0;
-
-  return Math.max(
-    1,
-    Math.ceil(
-      workCount / WORKS_PER_BATCH,
-    ),
-  );
-}
-
 export async function GET(
   request: NextRequest,
 ) {
@@ -187,7 +144,10 @@ export async function GET(
     seed
   ) {
     const workPageCount =
-      await getWorkPageCount();
+      await getDiscoverCandidatePageCount(
+        categories,
+        searchQuery,
+      );
     const startOffset =
       deterministicStartOffset(
         seed,

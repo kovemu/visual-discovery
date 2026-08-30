@@ -42,6 +42,50 @@ export {
 import { normalizeRotationDegrees } from "@/lib/works/workRotation";
 
 const WORKS_PER_BATCH = 36;
+const DISCOVER_EFFECTIVE_VIEW =
+  "discover_works_effective";
+
+const DISCOVER_EFFECTIVE_SELECT = `
+          id,
+          artist_id,
+          type,
+          source,
+          source_id,
+          source_url,
+          title,
+          description,
+          thumbnail_url,
+          published_at,
+          duration_seconds,
+          discover_category,
+          rotation_degrees,
+          artist_name,
+          artist_username,
+          artist_category,
+          artist_tags,
+          effective_category
+        `;
+
+type DiscoverEffectiveRow = {
+  id: number;
+  artist_id: string | null;
+  type: string;
+  source: string;
+  source_id: string | null;
+  source_url: string;
+  title: string | null;
+  description: string | null;
+  thumbnail_url: string | null;
+  published_at: string | null;
+  duration_seconds: number | null;
+  discover_category: string | null;
+  rotation_degrees: number | null;
+  artist_name: string | null;
+  artist_username: string | null;
+  artist_category: string | null;
+  artist_tags: string[] | null;
+  effective_category: string | null;
+};
 
 
 
@@ -194,6 +238,49 @@ function buildDiscoverWorkSearchOrFilter(
   return filters.join(",");
 }
 
+function buildDiscoverEffectiveViewSearchOrFilter(
+  token: string,
+) {
+  const pattern = `"*${escapePostgrestIlikePattern(token)}*"`;
+
+  return [
+    `title.ilike.${pattern}`,
+    `description.ilike.${pattern}`,
+    `artist_name.ilike.${pattern}`,
+    `artist_username.ilike.${pattern}`,
+  ].join(",");
+}
+
+function applyDiscoverEffectiveSearchFilter<
+  T extends {
+    or: (
+      filters: string,
+      options?: {
+        foreignTable?: string;
+      },
+    ) => T;
+  },
+>(
+  query: T,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
+): T {
+  if (tokenMatches.length === 0) {
+    return query;
+  }
+
+  let nextQuery = query;
+
+  for (const match of tokenMatches) {
+    nextQuery = nextQuery.or(
+      buildDiscoverEffectiveViewSearchOrFilter(
+        match.token,
+      ),
+    );
+  }
+
+  return nextQuery;
+}
+
 async function resolveMatchingCreatorIdsForToken(
   supabase: Awaited<
     ReturnType<typeof createClient>
@@ -323,47 +410,7 @@ const DISCOVER_WORK_SELECT = `
 
         `;
 
-const DISCOVER_WORK_CREATOR_SELECT = `
-
-          id,
-
-          type,
-
-          source,
-
-          source_id,
-
-          source_url,
-
-          title,
-
-          description,
-
-          thumbnail_url,
-
-          published_at,
-
-          duration_seconds,
-
-          discover_category,
-
-          rotation_degrees,
-
-          artist:creators!inner (
-
-            id,
-
-            name,
-
-            category,
-
-            tags
-
-          )
-
-        `;
-
-function applyDiscoverCategoryOnWork<
+function applyDiscoverEffectiveCategoryFilter<
   T extends {
     eq: (
       column: string,
@@ -380,86 +427,47 @@ function applyDiscoverCategoryOnWork<
 ): T {
   if (categories.length === 1) {
     return query.eq(
-      "discover_category",
+      "effective_category",
       categories[0],
     );
   }
 
   return query.in(
-    "discover_category",
+    "effective_category",
     categories,
   );
 }
 
-function applyDiscoverCreatorCategory<
-  T extends {
-    is: (
-      column: string,
-      value: null,
-    ) => T;
-    eq: (
-      column: string,
-      value: string,
-    ) => T;
-    in: (
-      column: string,
-      values: readonly string[],
-    ) => T;
-  },
->(
-  query: T,
-  categories: CreatorCategory[],
-): T {
-  let nextQuery = query.is(
-    "discover_category",
-    null,
-  );
+function effectiveRowToWorkWithCreator(
+  row: DiscoverEffectiveRow,
+): WorkWithCreator {
+  const artist = row.artist_id
+    ? {
+        id: row.artist_id,
+        name: row.artist_name ?? "",
+        category: row.artist_category ?? "",
+        tags: row.artist_tags ?? [],
+      }
+    : null;
 
-  if (categories.length === 1) {
-    return nextQuery.eq(
-      "creators.category",
-      categories[0],
-    );
-  }
-
-  return nextQuery.in(
-    "creators.category",
-    categories,
-  );
+  return {
+    id: row.id,
+    type: row.type,
+    source: row.source,
+    source_id: row.source_id,
+    source_url: row.source_url,
+    title: row.title,
+    description: row.description,
+    thumbnail_url: row.thumbnail_url,
+    published_at: row.published_at,
+    duration_seconds: row.duration_seconds,
+    discover_category: row.discover_category,
+    rotation_degrees: row.rotation_degrees,
+    artist,
+  };
 }
 
-function sortDiscoverWorkRows(
-  rows: WorkWithCreator[],
-) {
-  return [...rows].sort((left, right) => {
-    const leftTime = left.published_at
-      ? Date.parse(left.published_at)
-      : 0;
-    const rightTime = right.published_at
-      ? Date.parse(right.published_at)
-      : 0;
-
-    if (rightTime !== leftTime) {
-      return rightTime - leftTime;
-    }
-
-    return right.id - left.id;
-  });
-}
-
-function mergeDiscoverWorkRows(
-  rows: WorkWithCreator[],
-) {
-  return sortDiscoverWorkRows(
-    Array.from(
-      new Map(
-        rows.map((row) => [row.id, row]),
-      ).values(),
-    ),
-  );
-}
-
-async function countDiscoverWorksByWorkCategory(
+async function countDiscoverWorksByEffectiveCategory(
   supabase: Awaited<
     ReturnType<typeof createClient>
   >,
@@ -467,7 +475,7 @@ async function countDiscoverWorksByWorkCategory(
   tokenMatches: readonly DiscoverSearchTokenMatch[],
 ) {
   let countQuery = supabase
-    .from("works")
+    .from(DISCOVER_EFFECTIVE_VIEW)
     .select("id", {
       count: "exact",
       head: true,
@@ -475,20 +483,22 @@ async function countDiscoverWorksByWorkCategory(
     .eq("featured", false)
     .eq("discover_eligible", true);
 
-  countQuery = applyDiscoverCategoryOnWork(
-    countQuery,
-    categories,
-  );
-  countQuery = applyDiscoverSearchFilter(
-    countQuery,
-    tokenMatches,
-  );
+  countQuery =
+    applyDiscoverEffectiveCategoryFilter(
+      countQuery,
+      categories,
+    );
+  countQuery =
+    applyDiscoverEffectiveSearchFilter(
+      countQuery,
+      tokenMatches,
+    );
 
   const { count, error } = await countQuery;
 
   if (error) {
     console.log(
-      "LOAD DISCOVER WORK CATEGORY COUNT ERROR:",
+      "LOAD DISCOVER EFFECTIVE CATEGORY COUNT ERROR:",
       {
         code: error.code,
         message: error.message,
@@ -503,72 +513,31 @@ async function countDiscoverWorksByWorkCategory(
   return count ?? 0;
 }
 
-async function countDiscoverWorksByCreatorCategory(
+async function fetchDiscoverWorksByEffectiveCategory(
   supabase: Awaited<
     ReturnType<typeof createClient>
   >,
   categories: CreatorCategory[],
   tokenMatches: readonly DiscoverSearchTokenMatch[],
-) {
-  let countQuery = supabase
-    .from("works")
-    .select("id, artist:creators!inner(category)", {
-      count: "exact",
-      head: true,
-    })
-    .eq("featured", false)
-    .eq("discover_eligible", true);
-
-  countQuery = applyDiscoverCreatorCategory(
-    countQuery,
-    categories,
-  );
-  countQuery = applyDiscoverSearchFilter(
-    countQuery,
-    tokenMatches,
-  );
-
-  const { count, error } = await countQuery;
-
-  if (error) {
-    console.log(
-      "LOAD DISCOVER CREATOR CATEGORY COUNT ERROR:",
-      {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      },
-    );
-
-    return 0;
-  }
-
-  return count ?? 0;
-}
-
-async function fetchDiscoverWorksByWorkCategory(
-  supabase: Awaited<
-    ReturnType<typeof createClient>
-  >,
-  categories: CreatorCategory[],
-  tokenMatches: readonly DiscoverSearchTokenMatch[],
-  fetchThrough: number,
+  from: number,
+  to: number,
 ) {
   let worksQuery = supabase
-    .from("works")
-    .select(DISCOVER_WORK_SELECT)
+    .from(DISCOVER_EFFECTIVE_VIEW)
+    .select(DISCOVER_EFFECTIVE_SELECT)
     .eq("featured", false)
     .eq("discover_eligible", true);
 
-  worksQuery = applyDiscoverCategoryOnWork(
-    worksQuery,
-    categories,
-  );
-  worksQuery = applyDiscoverSearchFilter(
-    worksQuery,
-    tokenMatches,
-  );
+  worksQuery =
+    applyDiscoverEffectiveCategoryFilter(
+      worksQuery,
+      categories,
+    );
+  worksQuery =
+    applyDiscoverEffectiveSearchFilter(
+      worksQuery,
+      tokenMatches,
+    );
 
   const { data, error } = await worksQuery
     .order("published_at", {
@@ -578,11 +547,11 @@ async function fetchDiscoverWorksByWorkCategory(
     .order("id", {
       ascending: false,
     })
-    .range(0, fetchThrough);
+    .range(from, to);
 
   if (error) {
     console.log(
-      "LOAD DISCOVER WORK CATEGORY ROWS ERROR:",
+      "LOAD DISCOVER EFFECTIVE CATEGORY ROWS ERROR:",
       {
         code: error.code,
         message: error.message,
@@ -594,60 +563,9 @@ async function fetchDiscoverWorksByWorkCategory(
     return [];
   }
 
-  return (data ?? []) as unknown as WorkWithCreator[];
+  return (data ??
+    []) as unknown as DiscoverEffectiveRow[];
 }
-
-async function fetchDiscoverWorksByCreatorCategory(
-  supabase: Awaited<
-    ReturnType<typeof createClient>
-  >,
-  categories: CreatorCategory[],
-  tokenMatches: readonly DiscoverSearchTokenMatch[],
-  fetchThrough: number,
-) {
-  let worksQuery = supabase
-    .from("works")
-    .select(DISCOVER_WORK_CREATOR_SELECT)
-    .eq("featured", false)
-    .eq("discover_eligible", true);
-
-  worksQuery = applyDiscoverCreatorCategory(
-    worksQuery,
-    categories,
-  );
-  worksQuery = applyDiscoverSearchFilter(
-    worksQuery,
-    tokenMatches,
-  );
-
-  const { data, error } = await worksQuery
-    .order("published_at", {
-      ascending: false,
-      nullsFirst: false,
-    })
-    .order("id", {
-      ascending: false,
-    })
-    .range(0, fetchThrough);
-
-  if (error) {
-    console.log(
-      "LOAD DISCOVER CREATOR CATEGORY ROWS ERROR:",
-      {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      },
-    );
-
-    return [];
-  }
-
-  return (data ?? []) as unknown as WorkWithCreator[];
-}
-
-
 
 function resolveCreator(
 
@@ -1003,24 +921,48 @@ async function getDiscoverableWorkCount(
     return count ?? 0;
   }
 
-  const [
-    workCategoryCount,
-    creatorCategoryCount,
-  ] = await Promise.all([
-    countDiscoverWorksByWorkCategory(
-      supabase,
-      dbCategories,
-      tokenMatches,
-    ),
-    countDiscoverWorksByCreatorCategory(
-      supabase,
-      dbCategories,
-      tokenMatches,
-    ),
-  ]);
+  return countDiscoverWorksByEffectiveCategory(
+    supabase,
+    dbCategories,
+    tokenMatches,
+  );
 
-  return workCategoryCount + creatorCategoryCount;
+}
 
+export async function getDiscoverCandidatePageCount(
+  categories: CreatorCategory[] | null = null,
+  searchQuery: string | null = null,
+) {
+  const supabase = await createClient();
+  const normalizedSearch =
+    normalizeDiscoverSearchQuery(
+      searchQuery,
+    );
+  const searchTokens =
+    tokenizeDiscoverSearchQuery(
+      normalizedSearch,
+    );
+  const tokenMatches =
+    searchTokens.length > 0
+      ? await resolveDiscoverSearchTokenMatches(
+          supabase,
+          searchTokens,
+        )
+      : [];
+
+  const workCount =
+    await getDiscoverableWorkCount(
+      supabase,
+      categories,
+      tokenMatches,
+    );
+
+  return Math.max(
+    1,
+    Math.ceil(
+      workCount / WORKS_PER_BATCH,
+    ),
+  );
 }
 
 
@@ -1112,28 +1054,18 @@ export async function getDiscoverCandidateBatch(
   let rows: WorkWithCreator[] = [];
 
   if (dbCategories) {
-    const [
-      workCategoryRows,
-      creatorCategoryRows,
-    ] = await Promise.all([
-      fetchDiscoverWorksByWorkCategory(
+    const effectiveRows =
+      await fetchDiscoverWorksByEffectiveCategory(
         supabase,
         dbCategories,
         tokenMatches,
+        from,
         to,
-      ),
-      fetchDiscoverWorksByCreatorCategory(
-        supabase,
-        dbCategories,
-        tokenMatches,
-        to,
-      ),
-    ]);
+      );
 
-    rows = mergeDiscoverWorkRows([
-      ...workCategoryRows,
-      ...creatorCategoryRows,
-    ]).slice(from, to + 1);
+    rows = effectiveRows.map(
+      effectiveRowToWorkWithCreator,
+    );
   } else {
     let worksQuery = supabase
       .from("works")
