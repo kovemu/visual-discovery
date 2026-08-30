@@ -22,6 +22,18 @@ const INITIAL_FEED_SIZE = 12;
 const APPEND_BATCH_SIZE = 12;
 const MAX_PAGES_PER_FILL = 16;
 const RECENT_SEEN_LIMIT = 48;
+const SEEDED_START_ROUND = 1;
+
+function createFeedSeed() {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
 
 type CandidateBatchResponse = {
   works?: FeedItem[];
@@ -51,9 +63,11 @@ async function fetchCategoryBatch(
   categorySignature: string,
   round: number,
   searchQuery: string,
+  seed: string,
 ) {
   const params = new URLSearchParams({
     round: String(round),
+    seed,
   });
 
   if (categorySignature !== "all") {
@@ -91,7 +105,8 @@ export function useDiscoverFeed(
   const seenIdsRef = useRef<Set<string>>(new Set());
   const recentIdsRef = useRef<string[]>([]);
   const recentArtistIdsRef = useRef<string[]>([]);
-  const roundRef = useRef(0);
+  const feedSeedRef = useRef(createFeedSeed());
+  const roundRef = useRef(SEEDED_START_ROUND);
   const appendingRef = useRef(false);
   const generationRef = useRef(0);
   const emptyPageStreakRef = useRef(0);
@@ -149,6 +164,7 @@ export function useDiscoverFeed(
           signatureToLoad,
           roundRef.current,
           queryToLoad,
+          feedSeedRef.current,
         );
 
         if (generation !== generationRef.current) {
@@ -218,7 +234,7 @@ export function useDiscoverFeed(
     seenIdsRef.current = new Set();
     recentIdsRef.current = [];
     recentArtistIdsRef.current = [];
-    roundRef.current = 0;
+    roundRef.current = SEEDED_START_ROUND;
     emptyPageStreakRef.current = 0;
     appendingRef.current = false;
     setWorks([]);
