@@ -48,6 +48,7 @@ export type FeedItem = {
   durationSeconds?: number;
   rotationDegrees?: number;
   thumbnailRotationDegrees?: number;
+  feedKey?: string;
 };
 
 type DiscoverFeedProps = {

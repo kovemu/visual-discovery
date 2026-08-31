@@ -598,7 +598,7 @@ export default function DiscoverCarousel({
 
       const removedIds = currentWorks
         .slice(0, pruneCount)
-        .map((work) => work.id);
+        .map((work) => work.feedKey ?? work.id);
 
       if (removedIds.length === 0) {
         return;
@@ -917,7 +917,7 @@ export default function DiscoverCarousel({
 
     return (
       <div
-        key={work.id}
+        key={work.feedKey ?? work.id}
         data-feed-index={feedIndex}
         data-carousel-card=""
         className="shrink-0"

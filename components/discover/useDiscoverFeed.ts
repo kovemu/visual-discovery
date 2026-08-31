@@ -38,6 +38,8 @@ function createFeedSeed() {
 type CandidateBatchResponse = {
   works?: FeedItem[];
   nextRound?: number;
+  artistPageCount?: number;
+  workPage?: number;
 };
 
 function resolveCategoriesFromSignature(
@@ -67,8 +69,11 @@ async function fetchCategoryBatch(
 ) {
   const params = new URLSearchParams({
     round: String(round),
-    seed,
   });
+
+  if (seed) {
+    params.set("seed", seed);
+  }
 
   if (categorySignature !== "all") {
     params.set("categories", categorySignature);
@@ -96,6 +101,7 @@ export function useDiscoverFeed(
   searchQuery = "",
 ) {
   const normalizedSearch = searchQuery.trim();
+  const isSearchMode = normalizedSearch.length > 0;
   const [works, setWorks] = useState<FeedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -111,6 +117,12 @@ export function useDiscoverFeed(
   const generationRef = useRef(0);
   const emptyPageStreakRef = useRef(0);
   const pickedWorkIdsRef = useRef(pickedWorkIds);
+  const searchResultCacheRef = useRef<FeedItem[]>([]);
+  const searchCacheIdsRef = useRef<Set<string>>(new Set());
+  const searchFetchedPagesRef = useRef<Set<number>>(new Set());
+  const searchExhaustedRef = useRef(false);
+  const searchLoopCursorRef = useRef(0);
+  const searchLoopSeqRef = useRef(0);
 
   worksRef.current = works;
   pickedWorkIdsRef.current = pickedWorkIds;
@@ -135,6 +147,87 @@ export function useDiscoverFeed(
     ].slice(-DISCOVER_ARTIST_HISTORY_LIMIT);
   }, []);
 
+  const resetSearchLoopState = useCallback(() => {
+    searchResultCacheRef.current = [];
+    searchCacheIdsRef.current = new Set();
+    searchFetchedPagesRef.current = new Set();
+    searchExhaustedRef.current = false;
+    searchLoopCursorRef.current = 0;
+    searchLoopSeqRef.current = 0;
+  }, []);
+
+  const rememberSearchResults = useCallback(
+    (incoming: FeedItem[], categories: CreatorCategory[] | null) => {
+      let newUnique = 0;
+
+      for (const work of incoming) {
+        if (
+          !workMatchesDiscoverCategories(work, categories) ||
+          pickedWorkIdsRef.current.has(work.id) ||
+          searchCacheIdsRef.current.has(work.id)
+        ) {
+          continue;
+        }
+
+        searchCacheIdsRef.current.add(work.id);
+        searchResultCacheRef.current.push(work);
+        newUnique += 1;
+      }
+
+      return newUnique;
+    },
+    [],
+  );
+
+  const takeFromSearchLoop = useCallback((needed: number) => {
+    const cache = searchResultCacheRef.current;
+
+    if (cache.length === 0 || needed <= 0) {
+      return [] as FeedItem[];
+    }
+
+    const selected: FeedItem[] = [];
+    const maxScans = cache.length * needed;
+    let scanned = 0;
+
+    while (selected.length < needed && scanned < maxScans) {
+      const index =
+        searchLoopCursorRef.current % cache.length;
+      searchLoopCursorRef.current = index + 1;
+      scanned += 1;
+
+      const work = cache[index];
+
+      if (pickedWorkIdsRef.current.has(work.id)) {
+        continue;
+      }
+
+      searchLoopSeqRef.current += 1;
+      selected.push({
+        ...work,
+        feedKey: `${work.id}#${searchLoopSeqRef.current}`,
+      });
+    }
+
+    return selected;
+  }, []);
+
+  const isSearchLoopReady = useCallback(() => {
+    if (
+      !searchExhaustedRef.current ||
+      searchResultCacheRef.current.length === 0 ||
+      candidateBufferRef.current.length > 0
+    ) {
+      return false;
+    }
+
+    return searchResultCacheRef.current.every(
+      (work) =>
+        seenIdsRef.current.has(work.id) ||
+        pickedWorkIdsRef.current.has(work.id),
+    );
+  }, []);
+
   const collectBatch = useCallback(
     async (
       signatureToLoad: string,
@@ -145,6 +238,7 @@ export function useDiscoverFeed(
       const categories = resolveCategoriesFromSignature(
         signatureToLoad,
       );
+      const searchMode = queryToLoad.trim().length > 0;
 
       const isUsableCandidate = (work: FeedItem) =>
         workMatchesDiscoverCategories(work, categories) &&
@@ -158,13 +252,14 @@ export function useDiscoverFeed(
 
       while (
         candidateBufferRef.current.length < needed &&
-        pagesTried < MAX_PAGES_PER_FILL
+        pagesTried < MAX_PAGES_PER_FILL &&
+        !(searchMode && searchExhaustedRef.current)
       ) {
         const data = await fetchCategoryBatch(
           signatureToLoad,
           roundRef.current,
           queryToLoad,
-          feedSeedRef.current,
+          searchMode ? "" : feedSeedRef.current,
         );
 
         if (generation !== generationRef.current) {
@@ -185,6 +280,31 @@ export function useDiscoverFeed(
           candidateBufferRef.current.map((work) => work.id),
         );
 
+        if (searchMode) {
+          rememberSearchResults(incoming, categories);
+
+          const pageCount =
+            typeof data.artistPageCount === "number"
+              ? data.artistPageCount
+              : null;
+
+          if (typeof data.workPage === "number") {
+            if (searchFetchedPagesRef.current.has(data.workPage)) {
+              searchExhaustedRef.current = true;
+            } else {
+              searchFetchedPagesRef.current.add(data.workPage);
+            }
+          }
+
+          if (
+            incoming.length === 0 ||
+            (pageCount !== null &&
+              searchFetchedPagesRef.current.size >= pageCount)
+          ) {
+            searchExhaustedRef.current = true;
+          }
+        }
+
         const matches = incoming.filter(
           (work) =>
             isUsableCandidate(work) &&
@@ -199,7 +319,7 @@ export function useDiscoverFeed(
           candidateBufferRef.current.push(...matches);
         }
 
-        if (emptyPageStreakRef.current >= 6) {
+        if (!searchMode && emptyPageStreakRef.current >= 6) {
           seenIdsRef.current = new Set(
             worksRef.current.map((work) => work.id),
           );
@@ -220,7 +340,7 @@ export function useDiscoverFeed(
 
       return selected;
     },
-    [rememberSelectedWorks],
+    [rememberSearchResults, rememberSelectedWorks],
   );
 
   useEffect(() => {
@@ -234,9 +354,10 @@ export function useDiscoverFeed(
     seenIdsRef.current = new Set();
     recentIdsRef.current = [];
     recentArtistIdsRef.current = [];
-    roundRef.current = SEEDED_START_ROUND;
+    roundRef.current = isSearchMode ? 0 : SEEDED_START_ROUND;
     emptyPageStreakRef.current = 0;
     appendingRef.current = false;
+    resetSearchLoopState();
     setWorks([]);
     setIsLoading(true);
     setIsLoadingMore(false);
@@ -267,7 +388,7 @@ export function useDiscoverFeed(
         }
       }
     })();
-  }, [categorySignature, collectBatch, normalizedSearch, picksReady]);
+  }, [categorySignature, collectBatch, isSearchMode, normalizedSearch, picksReady, resetSearchLoopState]);
 
   const appendNextBatch = useCallback(async () => {
     if (appendingRef.current || isLoading) {
@@ -275,25 +396,63 @@ export function useDiscoverFeed(
     }
 
     appendingRef.current = true;
-    setIsLoadingMore(true);
     const generation = generationRef.current;
+    const canLoopSearch = isSearchMode && isSearchLoopReady();
+
+    if (canLoopSearch) {
+      try {
+        const nextWorks = takeFromSearchLoop(APPEND_BATCH_SIZE);
+
+        if (
+          generation !== generationRef.current ||
+          nextWorks.length === 0
+        ) {
+          return;
+        }
+
+        setWorks((current) => [...current, ...nextWorks]);
+      } finally {
+        appendingRef.current = false;
+      }
+
+      return;
+    }
+
+    setIsLoadingMore(true);
 
     try {
-      const nextWorks = await collectBatch(
+      let nextWorks = await collectBatch(
         categorySignature,
         APPEND_BATCH_SIZE,
         generation,
         normalizedSearch,
       );
 
-      if (
-        generation !== generationRef.current ||
-        nextWorks.length === 0
-      ) {
+      if (generation !== generationRef.current) {
         return;
       }
 
+      if (
+        nextWorks.length === 0 &&
+        isSearchMode &&
+        isSearchLoopReady()
+      ) {
+        nextWorks = takeFromSearchLoop(APPEND_BATCH_SIZE);
+      }
+
+      if (nextWorks.length === 0) {
+        return;
+      }
+
+      const isLoopBatch = nextWorks.some((work) =>
+        Boolean(work.feedKey),
+      );
+
       setWorks((current) => {
+        if (isLoopBatch) {
+          return [...current, ...nextWorks];
+        }
+
         const existing = new Set(current.map((work) => work.id));
         const unique = nextWorks.filter(
           (work) => !existing.has(work.id),
@@ -318,13 +477,25 @@ export function useDiscoverFeed(
         setIsLoadingMore(false);
       }
     }
-  }, [categorySignature, collectBatch, isLoading, normalizedSearch]);
+  }, [
+    categorySignature,
+    collectBatch,
+    isLoading,
+    isSearchMode,
+    isSearchLoopReady,
+    normalizedSearch,
+    takeFromSearchLoop,
+  ]);
 
   const removePickedWork = useCallback((workId: string) => {
     seenIdsRef.current.add(workId);
     candidateBufferRef.current = candidateBufferRef.current.filter(
       (work) => work.id !== workId,
     );
+    searchResultCacheRef.current = searchResultCacheRef.current.filter(
+      (work) => work.id !== workId,
+    );
+    searchCacheIdsRef.current.delete(workId);
 
     setWorks((current) =>
       current.filter((work) => work.id !== workId),
@@ -339,7 +510,9 @@ export function useDiscoverFeed(
     const removed = new Set(workIds);
 
     setWorks((current) => {
-      const next = current.filter((work) => !removed.has(work.id));
+      const next = current.filter(
+        (work) => !removed.has(work.feedKey ?? work.id),
+      );
 
       return next.length === current.length ? current : next;
     });
