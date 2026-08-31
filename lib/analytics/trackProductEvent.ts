@@ -3,6 +3,7 @@ import { getAnalyticsSessionId } from "@/lib/analytics/getAnalyticsSessionId";
 export const PRODUCT_EVENT_NAMES = [
   "discover_view",
   "discover_set_view",
+  "saved_view",
   "card_open",
   "save",
   "next",

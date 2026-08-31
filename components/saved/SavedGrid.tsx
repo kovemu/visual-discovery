@@ -296,6 +296,19 @@ export default function SavedGrid() {
   );
 
   const suppressClickRef = useRef(false);
+  const savedViewTrackedRef = useRef(false);
+
+  useEffect(() => {
+    if (savedViewTrackedRef.current) {
+      return;
+    }
+
+    savedViewTrackedRef.current = true;
+
+    trackProductEvent({
+      event_name: "saved_view",
+    });
+  }, []);
 
   function closeSavedWorkModal() {
     setSelectedWork(null);
