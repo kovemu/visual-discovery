@@ -148,11 +148,11 @@ export default function WorkMediaModal({
                     : "Work"
                 }
                 rotationDegrees={
-                  work.rotationDegrees
+                  work.thumbnailRotationDegrees
                 }
                 layout={
                   isRotatedMedia(
-                    work.rotationDegrees,
+                    work.thumbnailRotationDegrees,
                   )
                     ? "modal"
                     : "thumbnail"

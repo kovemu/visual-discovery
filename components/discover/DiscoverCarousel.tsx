@@ -956,7 +956,9 @@ export default function DiscoverCarousel({
                   ? `${work.artistName} work`
                   : "Discover work"
               }
-              rotationDegrees={work.rotationDegrees}
+              rotationDegrees={
+                work.thumbnailRotationDegrees
+              }
               draggable={false}
               referrerPolicy={
                 work.type === "tiktok"

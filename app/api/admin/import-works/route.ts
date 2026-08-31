@@ -20,6 +20,7 @@ type ImportWork = {
   featured?: boolean;
   source?: string;
   rotation_degrees?: number;
+  thumbnail_rotation_degrees?: number;
 };
 
 type ImportWorkRow = {
@@ -35,6 +36,7 @@ type ImportWorkRow = {
   duration_seconds: number | null;
   featured: boolean;
   rotation_degrees: number;
+  thumbnail_rotation_degrees: number;
 };
 
 function resolveWorkSource(source: unknown) {
@@ -216,6 +218,10 @@ export async function POST(request: NextRequest) {
           rotation_degrees: normalizeRotationDegrees(
             work.rotation_degrees,
           ),
+          thumbnail_rotation_degrees:
+            normalizeRotationDegrees(
+              work.thumbnail_rotation_degrees,
+            ),
         };
       },
     );

@@ -164,6 +164,7 @@ async function searchFancamVideoIds(
     type: "video",
     maxResults: String(MAX_SEARCH_RESULTS),
     videoDuration: "short",
+    videoEmbeddable: "true",
     relevanceLanguage: "ko",
     regionCode: "KR",
     key: YOUTUBE_API_KEY!,
@@ -265,6 +266,7 @@ async function loadVideoDetails(
   videoIds: string[],
 ) {
   const result = new Map<string, FancamWork>();
+  let excludedNonEmbeddable = 0;
 
   const uniqueIds = Array.from(
     new Set(videoIds),
@@ -282,7 +284,7 @@ async function loadVideoDetails(
 
     const params = new URLSearchParams({
       part:
-        "snippet,contentDetails,statistics",
+        "snippet,contentDetails,statistics,status",
       id: batch.join(","),
       key: YOUTUBE_API_KEY!,
     });
@@ -300,6 +302,11 @@ async function loadVideoDetails(
     const data = await response.json();
 
     for (const video of data.items ?? []) {
+      if (video.status?.embeddable === false) {
+        excludedNonEmbeddable += 1;
+        continue;
+      }
+
       const duration =
         video.contentDetails
           ?.duration ?? "PT0S";
@@ -362,7 +369,10 @@ async function loadVideoDetails(
     }
   }
 
-  return result;
+  return {
+    videos: result,
+    excludedNonEmbeddable,
+  };
 }
 
 export async function GET(
@@ -514,10 +524,12 @@ export async function GET(
       });
     }
 
-    const detailMap =
-      await loadVideoDetails(
-        videoIds,
-      );
+    const {
+      videos: detailMap,
+      excludedNonEmbeddable,
+    } = await loadVideoDetails(
+      videoIds,
+    );
 
     const works = videoIds
       .map((id) => detailMap.get(id))
@@ -545,9 +557,21 @@ export async function GET(
         works,
       );
 
+    const importStats = {
+      loaded: videoIds.length,
+      excludedNonEmbeddable,
+      available: works.length,
+    };
+
+    console.info(
+      "[youtube-importer/search]",
+      importStats,
+    );
+
     return NextResponse.json({
       works: filteredWorks,
       nextPageToken,
+      importStats,
       ...(partialError
         ? { warning: partialError }
         : {}),

@@ -34,6 +34,7 @@ type PickedWorkRow = {
   title: string | null;
   description: string | null;
   rotation_degrees: number | null;
+  thumbnail_rotation_degrees: number | null;
   artist:
     | {
         id: string;
@@ -215,6 +216,8 @@ function mapPickedWork(
     description: work.description,
     sourceUrl: work.source_url,
     rotationDegrees: work.rotation_degrees ?? 0,
+    thumbnailRotationDegrees:
+      work.thumbnail_rotation_degrees ?? 0,
     pickedAt,
   };
 }
@@ -553,7 +556,9 @@ function SavedCardStackRow({
                 <RotatedWorkThumbnail
                   src={thumbnail}
                   alt=""
-                  rotationDegrees={work.rotationDegrees}
+                  rotationDegrees={
+                    work.thumbnailRotationDegrees
+                  }
                   draggable={false}
                   imgClassName="h-full w-full object-cover"
                 />
@@ -678,6 +683,7 @@ export default function SavedPanel({
               title,
               description,
               rotation_degrees,
+              thumbnail_rotation_degrees,
               artist:creators (
                 id,
                 name
@@ -998,7 +1004,7 @@ export default function SavedPanel({
           />
 
           <div
-            className={`fixed inset-y-0 right-0 z-[56] w-[88vw] max-w-[360px] border-l border-[#262626] bg-[#111111] shadow-[-8px_0_24px_rgba(0,0,0,0.5)] transition-transform duration-300 xl:hidden ${
+            className={`fixed inset-y-0 right-0 z-[56] w-[72vw] max-w-[320px] border-l border-[#262626] bg-[#111111] shadow-[-8px_0_24px_rgba(0,0,0,0.5)] transition-transform duration-300 xl:hidden ${
               mobileOpen
                 ? "translate-x-0"
                 : "pointer-events-none translate-x-full"

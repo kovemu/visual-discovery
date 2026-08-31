@@ -59,6 +59,7 @@ const DISCOVER_EFFECTIVE_SELECT = `
           duration_seconds,
           discover_category,
           rotation_degrees,
+          thumbnail_rotation_degrees,
           artist_name,
           artist_username,
           artist_category,
@@ -80,6 +81,7 @@ type DiscoverEffectiveRow = {
   duration_seconds: number | null;
   discover_category: string | null;
   rotation_degrees: number | null;
+  thumbnail_rotation_degrees: number | null;
   artist_name: string | null;
   artist_username: string | null;
   artist_category: string | null;
@@ -114,6 +116,8 @@ type WorkRow = {
   discover_category: string | null;
 
   rotation_degrees: number | null;
+
+  thumbnail_rotation_degrees: number | null;
 
 };
 
@@ -396,6 +400,8 @@ const DISCOVER_WORK_SELECT = `
 
           rotation_degrees,
 
+          thumbnail_rotation_degrees,
+
           artist:creators (
 
             id,
@@ -463,6 +469,8 @@ function effectiveRowToWorkWithCreator(
     duration_seconds: row.duration_seconds,
     discover_category: row.discover_category,
     rotation_degrees: row.rotation_degrees,
+    thumbnail_rotation_degrees:
+      row.thumbnail_rotation_degrees,
     artist,
   };
 }
@@ -689,6 +697,11 @@ function mapWork(
       work.rotation_degrees,
     );
 
+  const thumbnailRotationDegrees =
+    normalizeRotationDegrees(
+      work.thumbnail_rotation_degrees,
+    );
+
   const artistId = creator?.id || undefined;
   const artistName = creator?.name || undefined;
   const artistTags = creator?.tags ?? [];
@@ -748,6 +761,8 @@ function mapWork(
 
       rotationDegrees,
 
+      thumbnailRotationDegrees,
+
     };
 
   }
@@ -804,6 +819,8 @@ function mapWork(
 
       rotationDegrees,
 
+      thumbnailRotationDegrees,
+
     };
 
   }
@@ -851,6 +868,8 @@ function mapWork(
     durationSeconds,
 
     rotationDegrees,
+
+    thumbnailRotationDegrees,
 
   };
 

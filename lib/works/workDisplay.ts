@@ -11,6 +11,7 @@ export type WorkMediaItem = {
   description?: string | null;
   caption?: string | null;
   rotationDegrees?: number;
+  thumbnailRotationDegrees?: number;
 };
 
 export function getAnalyticsSource(

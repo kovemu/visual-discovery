@@ -47,6 +47,7 @@ export type FeedItem = {
   artistUrl?: string;
   durationSeconds?: number;
   rotationDegrees?: number;
+  thumbnailRotationDegrees?: number;
 };
 
 type DiscoverFeedProps = {
@@ -473,6 +474,8 @@ export default function DiscoverFeed({
       caption: work.caption,
       sourceUrl: work.sourceUrl,
       rotationDegrees: work.rotationDegrees,
+      thumbnailRotationDegrees:
+        work.thumbnailRotationDegrees,
     };
   }
 

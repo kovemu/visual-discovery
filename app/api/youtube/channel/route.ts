@@ -270,6 +270,7 @@ export async function GET(request: NextRequest) {
         durationSeconds: number;
         viewCount: number;
         likeCount: number;
+        embeddable: boolean | undefined;
       }
     >();
 
@@ -277,7 +278,7 @@ export async function GET(request: NextRequest) {
       const idBatch = videoIds.slice(index, index + 50);
 
       const videoParams = new URLSearchParams({
-        part: "contentDetails,statistics",
+        part: "contentDetails,statistics,status",
         id: idBatch.join(","),
         key: YOUTUBE_API_KEY,
       });
@@ -307,9 +308,12 @@ export async function GET(request: NextRequest) {
           likeCount: parseStatistic(
             video.statistics?.likeCount,
           ),
+          embeddable: video.status?.embeddable,
         });
       }
     }
+
+    let excludedNonEmbeddable = 0;
 
     const formattedVideos = playlistItems
       .map((item: PlaylistItem) => {
@@ -317,6 +321,11 @@ export async function GET(request: NextRequest) {
         const detail = videoDetailMap.get(videoId ?? "");
 
         if (!videoId || !detail) {
+          return null;
+        }
+
+        if (detail.embeddable === false) {
+          excludedNonEmbeddable += 1;
           return null;
         }
 
@@ -389,6 +398,17 @@ export async function GET(request: NextRequest) {
     const channelDescription =
       channel.snippet.description ?? "";
 
+    const importStats = {
+      loaded: videoIds.length,
+      excludedNonEmbeddable,
+      available: formattedVideos.length,
+    };
+
+    console.info(
+      "[youtube-importer/channel]",
+      importStats,
+    );
+
     return NextResponse.json({
       channel: {
         id: channel.id,
@@ -409,6 +429,7 @@ export async function GET(request: NextRequest) {
       shorts: filteredShorts,
       videos: filteredVideos,
       nextPageToken,
+      importStats,
       ...(partialError
         ? { warning: partialError }
         : {}),

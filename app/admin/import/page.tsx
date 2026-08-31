@@ -664,6 +664,13 @@ const [
   >({});
 
   const [
+    thumbnailRotationById,
+    setThumbnailRotationById,
+  ] = useState<
+    Record<string, WorkRotationDegrees>
+  >({});
+
+  const [
     previewVideo,
     setPreviewVideo,
   ] = useState<{
@@ -1901,6 +1908,22 @@ function removeExternalImageDraft(
     }));
   }
 
+  function getThumbnailRotation(
+    videoId: string,
+  ): WorkRotationDegrees {
+    return thumbnailRotationById[videoId] ?? 0;
+  }
+
+  function setThumbnailRotation(
+    videoId: string,
+    degrees: WorkRotationDegrees,
+  ) {
+    setThumbnailRotationById((current) => ({
+      ...current,
+      [videoId]: degrees,
+    }));
+  }
+
   function toggleFeatured(
     videoId: string,
     event: React.MouseEvent,
@@ -2290,6 +2313,8 @@ function removeExternalImageDraft(
         rotation_degrees: getVideoRotation(
           video.id,
         ),
+        thumbnail_rotation_degrees:
+          getThumbnailRotation(video.id),
         ...(video.source === "tiktok"
           ? { source: "tiktok" as const }
           : {}),
@@ -4769,46 +4794,86 @@ if (
 
                         {!isTikTok && (
                           <div
-                            className="mt-2 flex flex-wrap gap-1"
+                            className="mt-2 flex flex-col gap-2"
                             onClick={(
                               event,
                             ) =>
                               event.stopPropagation()
                             }
                           >
-                            {WORK_ROTATION_OPTIONS.map(
-                              (degrees) => {
-                                const active =
-                                  getVideoRotation(
-                                    video.id,
-                                  ) === degrees;
-
-                                return (
-                                  <button
-                                    key={
-                                      degrees
-                                    }
-                                    type="button"
-                                    onClick={() =>
-                                      setVideoRotation(
+                            <div>
+                              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+                                Thumbnail rotation
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {WORK_ROTATION_OPTIONS.map(
+                                  (degrees) => {
+                                    const active =
+                                      getThumbnailRotation(
                                         video.id,
-                                        degrees,
-                                      )
-                                    }
-                                    className={`rounded-md px-2 py-1 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950 ${
-                                      active
-                                        ? "bg-zinc-950 text-white"
-                                        : "bg-zinc-50 text-zinc-500 ring-1 ring-zinc-200 hover:bg-zinc-100"
-                                    }`}
-                                  >
-                                    {degrees ===
-                                    0
-                                      ? "Normal"
-                                      : `${degrees}°`}
-                                  </button>
-                                );
-                              },
-                            )}
+                                      ) ===
+                                      degrees;
+
+                                    return (
+                                      <button
+                                        key={`thumb-${degrees}`}
+                                        type="button"
+                                        onClick={() =>
+                                          setThumbnailRotation(
+                                            video.id,
+                                            degrees,
+                                          )
+                                        }
+                                        className={`rounded-md px-2 py-1 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950 ${
+                                          active
+                                            ? "bg-zinc-950 text-white"
+                                            : "bg-zinc-50 text-zinc-500 ring-1 ring-zinc-200 hover:bg-zinc-100"
+                                        }`}
+                                      >
+                                        {`${degrees}°`}
+                                      </button>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+                                Video rotation
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {WORK_ROTATION_OPTIONS.map(
+                                  (degrees) => {
+                                    const active =
+                                      getVideoRotation(
+                                        video.id,
+                                      ) ===
+                                      degrees;
+
+                                    return (
+                                      <button
+                                        key={`video-${degrees}`}
+                                        type="button"
+                                        onClick={() =>
+                                          setVideoRotation(
+                                            video.id,
+                                            degrees,
+                                          )
+                                        }
+                                        className={`rounded-md px-2 py-1 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-950 ${
+                                          active
+                                            ? "bg-zinc-950 text-white"
+                                            : "bg-zinc-50 text-zinc-500 ring-1 ring-zinc-200 hover:bg-zinc-100"
+                                        }`}
+                                      >
+                                        {`${degrees}°`}
+                                      </button>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>

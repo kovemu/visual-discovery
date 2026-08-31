@@ -33,6 +33,7 @@ import WorkMediaModal from "@/components/works/WorkMediaModal";
 import RotatedWorkThumbnail from "@/components/works/RotatedWorkThumbnail";
 import ImportClipForm from "@/components/saved/ImportClipForm";
 import { trackProductEvent } from "@/lib/analytics/trackProductEvent";
+import { useOverlayHistory } from "@/lib/hooks/useOverlayHistory";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -62,6 +63,7 @@ type PickedWorkRow = {
   title: string | null;
   description: string | null;
   rotation_degrees: number | null;
+  thumbnail_rotation_degrees: number | null;
   artist:
     | {
         id: string;
@@ -176,6 +178,8 @@ function mapPickedWork(
       work.title ??
       null,
     rotationDegrees: work.rotation_degrees ?? 0,
+    thumbnailRotationDegrees:
+      work.thumbnail_rotation_degrees ?? 0,
   };
 }
 
@@ -193,7 +197,9 @@ function SavedCardFace({
           <RotatedWorkThumbnail
             src={thumbnail}
             alt=""
-            rotationDegrees={work.rotationDegrees}
+            rotationDegrees={
+              work.thumbnailRotationDegrees
+            }
             draggable={false}
             imgClassName="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
           />
@@ -291,6 +297,49 @@ export default function SavedGrid() {
 
   const suppressClickRef = useRef(false);
 
+  function closeSavedWorkModal() {
+    setSelectedWork(null);
+  }
+
+  const {
+    requestClose: requestCloseSavedWorkModal,
+  } = useOverlayHistory(
+    "work",
+    selectedWork !== null,
+    closeSavedWorkModal,
+  );
+
+  useEffect(() => {
+    if (!selectedWork) {
+      return;
+    }
+
+    const handleKeyDown = (
+      event: KeyboardEvent,
+    ) => {
+      if (event.key === "Escape") {
+        requestCloseSavedWorkModal();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener(
+      "keydown",
+      handleKeyDown,
+    );
+
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown,
+      );
+    };
+  }, [
+    selectedWork,
+    requestCloseSavedWorkModal,
+  ]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -343,6 +392,7 @@ export default function SavedGrid() {
               title,
               description,
               rotation_degrees,
+              thumbnail_rotation_degrees,
               artist:creators (
                 id,
                 name
@@ -551,7 +601,7 @@ export default function SavedGrid() {
     if (
       selectedWork?.id === work.id
     ) {
-      setSelectedWork(null);
+      requestCloseSavedWorkModal();
     }
 
     const { error } =
@@ -672,9 +722,7 @@ export default function SavedGrid() {
         <WorkMediaModal
           work={selectedWork}
           isSaved
-          onClose={() =>
-            setSelectedWork(null)
-          }
+          onClose={requestCloseSavedWorkModal}
           onToggleSave={() =>
             void handleUnsave(
               selectedWork,

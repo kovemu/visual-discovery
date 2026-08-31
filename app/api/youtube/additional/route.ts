@@ -181,6 +181,7 @@ async function loadVideoDetails(
       durationSeconds: number;
     }
   >();
+  let excludedNonEmbeddable = 0;
 
   const uniqueIds =
     Array.from(
@@ -201,7 +202,7 @@ async function loadVideoDetails(
     const params =
       new URLSearchParams({
         part:
-          "snippet,contentDetails",
+          "snippet,contentDetails,status",
         id: batch.join(","),
         key: YOUTUBE_API_KEY!,
       });
@@ -224,6 +225,11 @@ async function loadVideoDetails(
       const video of
         data.items ?? []
     ) {
+      if (video.status?.embeddable === false) {
+        excludedNonEmbeddable += 1;
+        continue;
+      }
+
       const duration =
         video.contentDetails
           ?.duration ??
@@ -274,16 +280,21 @@ async function loadVideoDetails(
     }
   }
 
-  return result;
+  return {
+    videos: result,
+    excludedNonEmbeddable,
+  };
 }
 
 async function loadSingleVideo(
   videoId: string,
 ) {
-  const map =
-    await loadVideoDetails([
-      videoId,
-    ]);
+  const {
+    videos: map,
+    excludedNonEmbeddable,
+  } = await loadVideoDetails([
+    videoId,
+  ]);
 
   const video =
     map.get(videoId);
@@ -294,7 +305,11 @@ async function loadSingleVideo(
     );
   }
 
-  return [video];
+  return {
+    works: [video],
+    excludedNonEmbeddable,
+    loaded: 1,
+  };
 }
 
 async function loadPlaylist(
@@ -372,15 +387,17 @@ async function loadPlaylist(
       MAX_PLAYLIST_ITEMS,
     );
 
-  const detailMap =
-    await loadVideoDetails(
-      trimmedIds,
-    );
+  const {
+    videos: detailMap,
+    excludedNonEmbeddable,
+  } = await loadVideoDetails(
+    trimmedIds,
+  );
 
   /*
     Playlist 순서 유지
   */
-  return trimmedIds
+  const works = trimmedIds
     .map((id) =>
       detailMap.get(id),
     )
@@ -391,6 +408,12 @@ async function loadPlaylist(
         typeof video
       > => Boolean(video),
     );
+
+  return {
+    works,
+    excludedNonEmbeddable,
+    loaded: trimmedIds.length,
+  };
 }
 
 export async function GET(
@@ -459,7 +482,7 @@ export async function GET(
       );
     }
 
-    const works =
+    const loadResult =
       parsed.type === "playlist"
         ? await loadPlaylist(
             parsed.id,
@@ -467,6 +490,12 @@ export async function GET(
         : await loadSingleVideo(
             parsed.id,
           );
+
+    const {
+      works,
+      excludedNonEmbeddable,
+      loaded,
+    } = loadResult;
 
     const supabaseAdmin = createClient(
       supabaseUrl,
@@ -485,9 +514,21 @@ export async function GET(
         works,
       );
 
+    const importStats = {
+      loaded,
+      excludedNonEmbeddable,
+      available: works.length,
+    };
+
+    console.info(
+      "[youtube-importer/additional]",
+      importStats,
+    );
+
     return NextResponse.json({
       type: parsed.type,
       works: filteredWorks,
+      importStats,
     });
   } catch (error) {
     console.error(

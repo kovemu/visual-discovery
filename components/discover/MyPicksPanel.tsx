@@ -29,6 +29,7 @@ type PickPanelWork = {
   caption?: string | null;
   sourceUrl?: string;
   rotationDegrees?: number;
+  thumbnailRotationDegrees?: number;
 };
 
 type PickedWorkRow = {
@@ -40,6 +41,7 @@ type PickedWorkRow = {
   title: string | null;
   description: string | null;
   rotation_degrees: number | null;
+  thumbnail_rotation_degrees: number | null;
   artist: {
     id: string;
     name: string;
@@ -126,6 +128,8 @@ function mapPickedWork(
       null,
     sourceUrl: work.source_url,
     rotationDegrees: work.rotation_degrees ?? 0,
+    thumbnailRotationDegrees:
+      work.thumbnail_rotation_degrees ?? 0,
   };
 }
 
@@ -448,6 +452,7 @@ function changeFilter(
                 title,
                 description,
                 rotation_degrees,
+                thumbnail_rotation_degrees,
                 artist:creators (
                   id,
                   name,
@@ -1286,7 +1291,7 @@ function changeFilter(
                                 src={thumbnail}
                                 alt=""
                                 rotationDegrees={
-                                  work.rotationDegrees
+                                  work.thumbnailRotationDegrees
                                 }
                                 draggable={false}
                                 imgClassName="h-full w-full object-cover"
@@ -1473,11 +1478,11 @@ function changeFilter(
         />
 
         <div
-          className={`fixed inset-y-0 right-0 z-[56] w-[88vw] max-w-[380px] touch-pan-y border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(0,0,0,0.08)] transition-transform duration-300 xl:hidden ${
+          className={`fixed inset-y-0 right-0 z-[56] w-[68vw] max-w-[320px] touch-pan-y border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(0,0,0,0.08)] transition-transform duration-300 xl:hidden ${
             mobileOpen
               ? "translate-x-0"
               : "pointer-events-none translate-x-full"
-          }`}
+          }`}//픽패널 크기
         >
           <div
             aria-label="Swipe right to close My Picks"
