@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import SavedPanel, {
   type SavedPanelWork,
@@ -51,9 +52,17 @@ export type FeedItem = {
   feedKey?: string;
 };
 
+export type DiscoverSubjectFilter = {
+  id: string;
+  slug: string;
+  name: string;
+  category: CreatorCategory;
+};
+
 type DiscoverFeedProps = {
   works: FeedItem[];
   initialCategories?: CreatorCategory[];
+  initialSubject?: DiscoverSubjectFilter | null;
   hideDiscoverHeading?: boolean;
 };
 
@@ -73,9 +82,11 @@ function normalizeDiscoverSearchQueryForAnalytics(
 export default function DiscoverFeed({
   works: _initialWorks,
   initialCategories,
+  initialSubject = null,
   hideDiscoverHeading = false,
 }: DiscoverFeedProps) {
   const { t } = useTranslation();
+  const router = useRouter();
   const supabase = useMemo(
     () => createClient(),
     [],
@@ -179,11 +190,23 @@ export default function DiscoverFeed({
     };
   }, [searchInput, categorySignature]);
 
+  const [activeSubject, setActiveSubject] =
+    useState<DiscoverSubjectFilter | null>(
+      initialSubject,
+    );
+
+  useEffect(() => {
+    if (debouncedSearch) {
+      setActiveSubject(null);
+    }
+  }, [debouncedSearch]);
+
   const feed = useDiscoverFeed(
     categorySignature,
     pickedWorkIds,
     picksLoaded,
     debouncedSearch,
+    debouncedSearch ? "" : (activeSubject?.id ?? ""),
   );
 
   const discoverViewTrackedRef = useRef(false);
@@ -244,6 +267,10 @@ export default function DiscoverFeed({
       categorySignatureRef.current;
 
     setSelectedCategories(nextCategories);
+
+    if (activeSubject && nextSignature !== activeSubject.category) {
+      setActiveSubject(null);
+    }
 
     if (
       nextSignature === previousSignature
@@ -573,6 +600,24 @@ export default function DiscoverFeed({
             );
           })}
 
+          {activeSubject ? (
+            <span className="inline-flex h-[30px] items-center gap-1 rounded-full border border-[rgba(192,132,252,0.45)] bg-[rgba(168,85,247,0.08)] px-2.5 text-[11px] text-[#e9d5ff]">
+              <span className="max-w-[140px] truncate">
+                {activeSubject.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  router.push("/");
+                }}
+                aria-label={`Clear ${activeSubject.name} filter`}
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[13px] leading-none text-[#e9d5ff]/80 hover:bg-white/10 hover:text-white"
+              >
+                ×
+              </button>
+            </span>
+          ) : null}
+
           <input
             type="search"
             value={searchInput}
@@ -593,7 +638,7 @@ export default function DiscoverFeed({
         ) : null}
 
         <DiscoverCarousel
-          key={`${categorySignature}:${debouncedSearch}`}
+          key={`${categorySignature}:${debouncedSearch}:${activeSubject?.id ?? ""}`}
           works={feed.works}
           pickedWorkIds={pickedWorkIds}
           isLoading={feed.isLoading}

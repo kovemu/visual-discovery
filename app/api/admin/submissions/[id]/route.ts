@@ -10,6 +10,7 @@ import {
   adminAuthErrorResponse,
   requireAdmin,
 } from "@/lib/auth/requireAdmin";
+import { classifyWorksSubjectsSafe } from "@/lib/subjects/classifyWorks.server";
 import {
   createImportedYouTubeWork,
   findYouTubeWork,
@@ -605,6 +606,11 @@ export async function PATCH(
           { status: 500 },
         );
       }
+
+      await classifyWorksSubjectsSafe(
+        supabaseAdmin,
+        [workId],
+      );
     }
 
     const nextStatus =

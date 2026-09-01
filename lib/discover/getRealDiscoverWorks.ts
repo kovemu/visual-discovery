@@ -5,6 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import type { FeedItem } from "@/components/discover/DiscoverFeed";
 
 import {
+  mergeDiscoverSearchWorkIds,
+  resolveDiscoverSubjectSearch,
+  sliceDiscoverSearchPriorityPage,
+} from "@/lib/discover/discoverSubjectSearch";
+import { parseDiscoverSubjectId } from "@/lib/discover/discoverSubjectFilter";
+import {
   workMatchesDiscoverCategories,
 } from "@/lib/discover/discoverCategorySelection";
 import type { CreatorCategory } from "@/lib/creator/creatorCategories";
@@ -166,6 +172,8 @@ export type DiscoverCandidateBatch = {
   artistPage: number;
 
   workPage: number;
+
+  subjectMatchCount?: number;
 
 };
 
@@ -575,6 +583,426 @@ async function fetchDiscoverWorksByEffectiveCategory(
     []) as unknown as DiscoverEffectiveRow[];
 }
 
+async function fetchDiscoverWorksByIds(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  workIds: readonly number[],
+  categories: CreatorCategory[] | null,
+  range?: {
+    from: number;
+    to: number;
+  },
+) {
+  if (workIds.length === 0) {
+    return [] as WorkWithCreator[];
+  }
+
+  if (categories) {
+    let worksQuery = supabase
+      .from(DISCOVER_EFFECTIVE_VIEW)
+      .select(DISCOVER_EFFECTIVE_SELECT)
+      .in("id", [...workIds])
+      .eq("featured", false)
+      .eq("discover_eligible", true);
+
+    worksQuery =
+      applyDiscoverEffectiveCategoryFilter(
+        worksQuery,
+        categories,
+      );
+
+    worksQuery = worksQuery
+      .order("published_at", {
+        ascending: false,
+        nullsFirst: false,
+      })
+      .order("id", {
+        ascending: false,
+      });
+
+    if (range) {
+      worksQuery = worksQuery.range(range.from, range.to);
+    }
+
+    const { data, error } = await worksQuery;
+
+    if (error) {
+      console.log(
+        "LOAD DISCOVER SUBJECT WORKS ERROR:",
+        {
+          code: error.code,
+          message: error.message,
+        },
+      );
+
+      return [] as WorkWithCreator[];
+    }
+
+    return (data ?? []).map(
+      effectiveRowToWorkWithCreator,
+    );
+  }
+
+  let worksQuery = supabase
+    .from("works")
+    .select(DISCOVER_WORK_SELECT)
+    .in("id", [...workIds])
+    .eq("featured", false)
+    .eq("discover_eligible", true)
+    .order("published_at", {
+      ascending: false,
+      nullsFirst: false,
+    })
+    .order("id", {
+      ascending: false,
+    });
+
+  if (range) {
+    worksQuery = worksQuery.range(range.from, range.to);
+  }
+
+  const { data, error } = await worksQuery;
+
+  if (error) {
+    console.log(
+      "LOAD DISCOVER SUBJECT WORKS ERROR:",
+      {
+        code: error.code,
+        message: error.message,
+      },
+    );
+
+    return [] as WorkWithCreator[];
+  }
+
+  return (data ??
+    []) as unknown as WorkWithCreator[];
+}
+
+async function countDiscoverWorksByIds(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  workIds: readonly number[],
+  categories: CreatorCategory[] | null,
+) {
+  if (workIds.length === 0) {
+    return 0;
+  }
+
+  if (categories) {
+    let countQuery = supabase
+      .from(DISCOVER_EFFECTIVE_VIEW)
+      .select("id", {
+        count: "exact",
+        head: true,
+      })
+      .in("id", [...workIds])
+      .eq("featured", false)
+      .eq("discover_eligible", true);
+
+    countQuery =
+      applyDiscoverEffectiveCategoryFilter(
+        countQuery,
+        categories,
+      );
+
+    const { count, error } = await countQuery;
+
+    if (error) {
+      console.log(
+        "COUNT DISCOVER SUBJECT FILTER WORKS ERROR:",
+        {
+          code: error.code,
+          message: error.message,
+        },
+      );
+
+      return 0;
+    }
+
+    return count ?? 0;
+  }
+
+  const { count, error } = await supabase
+    .from("works")
+    .select("id", {
+      count: "exact",
+      head: true,
+    })
+    .in("id", [...workIds])
+    .eq("featured", false)
+    .eq("discover_eligible", true);
+
+  if (error) {
+    console.log(
+      "COUNT DISCOVER SUBJECT FILTER WORKS ERROR:",
+      {
+        code: error.code,
+        message: error.message,
+      },
+    );
+
+    return 0;
+  }
+
+  return count ?? 0;
+}
+
+async function loadDiscoverWorkIdsForSubject(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  subjectId: string,
+) {
+  const { data, error } = await supabase
+    .from("work_subjects")
+    .select("work_id")
+    .eq("subject_id", subjectId)
+    .limit(2000);
+
+  if (error) {
+    console.log(
+      "LOAD DISCOVER SUBJECT FILTER IDS ERROR:",
+      {
+        subjectId,
+        code: error.code,
+        message: error.message,
+      },
+    );
+
+    return [] as number[];
+  }
+
+  const workIds = new Set<number>();
+
+  for (const row of data ?? []) {
+    const workId = Number(row.work_id);
+
+    if (Number.isInteger(workId) && workId > 0) {
+      workIds.add(workId);
+    }
+  }
+
+  return [...workIds];
+}
+
+async function fetchDiscoverMetadataSearchRows(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  categories: CreatorCategory[] | null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
+  from: number,
+  limit: number,
+  excludeWorkIds: ReadonlySet<number>,
+) {
+  if (limit <= 0) {
+    return [] as WorkWithCreator[];
+  }
+
+  const fetchSize = Math.max(
+    limit * 3,
+    WORKS_PER_BATCH,
+  );
+  let rows: WorkWithCreator[] = [];
+
+  if (categories) {
+    const effectiveRows =
+      await fetchDiscoverWorksByEffectiveCategory(
+        supabase,
+        categories,
+        tokenMatches,
+        from,
+        from + fetchSize - 1,
+      );
+
+    rows = effectiveRows.map(
+      effectiveRowToWorkWithCreator,
+    );
+  } else {
+    let worksQuery = supabase
+      .from("works")
+      .select(DISCOVER_WORK_SELECT)
+      .eq("featured", false)
+      .eq("discover_eligible", true);
+
+    worksQuery = applyDiscoverSearchFilter(
+      worksQuery,
+      tokenMatches,
+    );
+
+    const { data, error } = await worksQuery
+      .order("published_at", {
+        ascending: false,
+        nullsFirst: false,
+      })
+      .order("id", {
+        ascending: false,
+      })
+      .range(from, from + fetchSize - 1);
+
+    if (error) {
+      console.log(
+        "LOAD DISCOVER METADATA SEARCH ERROR:",
+        {
+          code: error.code,
+          message: error.message,
+        },
+      );
+
+      return [] as WorkWithCreator[];
+    }
+
+    rows =
+      (data ??
+        []) as unknown as WorkWithCreator[];
+  }
+
+  const filtered: WorkWithCreator[] = [];
+
+  for (const row of rows) {
+    if (excludeWorkIds.has(row.id)) {
+      continue;
+    }
+
+    filtered.push(row);
+
+    if (filtered.length >= limit) {
+      break;
+    }
+  }
+
+  return filtered;
+}
+
+function rowsToFeedItems(
+  rows: WorkWithCreator[],
+  dbCategories: CreatorCategory[] | null,
+) {
+  const works = rows
+    .filter(isDisplayableWork)
+    .map((row) => mapWork(row, resolveCreator(row.artist)))
+    .filter(
+      (item): item is FeedItem => item !== null,
+    );
+
+  if (!dbCategories) {
+    return works;
+  }
+
+  return works.filter((work) =>
+    workMatchesDiscoverCategories(
+      work,
+      dbCategories,
+    ),
+  );
+}
+
+async function getDiscoverableWorkCountWithSubjects(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  categories: CreatorCategory[] | null,
+  tokenMatches: readonly DiscoverSearchTokenMatch[],
+  priorityWorkIds: readonly number[],
+) {
+  const dbCategories =
+    getDiscoverDbCategoriesFilter(categories);
+  const excludeIds =
+    priorityWorkIds.length > 0 &&
+    priorityWorkIds.length <= 500
+      ? priorityWorkIds
+      : [];
+
+  if (!dbCategories) {
+    let countQuery = supabase
+      .from("works")
+      .select("id", {
+        count: "exact",
+        head: true,
+      })
+      .eq("featured", false)
+      .eq("discover_eligible", true);
+
+    countQuery = applyDiscoverSearchFilter(
+      countQuery,
+      tokenMatches,
+    );
+
+    if (excludeIds.length > 0) {
+      countQuery = countQuery.not(
+        "id",
+        "in",
+        `(${excludeIds.join(",")})`,
+      );
+    }
+
+    const { count, error } = await countQuery;
+
+    if (error) {
+      console.log(
+        "LOAD DISCOVER WORK COUNT ERROR:",
+        {
+          code: error.code,
+          message: error.message,
+        },
+      );
+
+      return priorityWorkIds.length;
+    }
+
+    return (
+      priorityWorkIds.length + (count ?? 0)
+    );
+  }
+
+  let countQuery = supabase
+    .from(DISCOVER_EFFECTIVE_VIEW)
+    .select("id", {
+      count: "exact",
+      head: true,
+    })
+    .eq("featured", false)
+    .eq("discover_eligible", true);
+
+  countQuery =
+    applyDiscoverEffectiveCategoryFilter(
+      countQuery,
+      dbCategories,
+    );
+  countQuery =
+    applyDiscoverEffectiveSearchFilter(
+      countQuery,
+      tokenMatches,
+    );
+
+  if (excludeIds.length > 0) {
+    countQuery = countQuery.not(
+      "id",
+      "in",
+      `(${excludeIds.join(",")})`,
+    );
+  }
+
+  const { count, error } = await countQuery;
+
+  if (error) {
+    console.log(
+      "LOAD DISCOVER EFFECTIVE CATEGORY COUNT ERROR:",
+      {
+        code: error.code,
+        message: error.message,
+      },
+    );
+
+    return priorityWorkIds.length;
+  }
+
+  return priorityWorkIds.length + (count ?? 0);
+}
+
 function resolveCreator(
 
   artist:
@@ -951,12 +1379,36 @@ async function getDiscoverableWorkCount(
 export async function getDiscoverCandidatePageCount(
   categories: CreatorCategory[] | null = null,
   searchQuery: string | null = null,
+  subjectId: string | null = null,
 ) {
   const supabase = await createClient();
   const normalizedSearch =
     normalizeDiscoverSearchQuery(
       searchQuery,
     );
+  const filterSubjectId =
+    normalizedSearch
+      ? null
+      : parseDiscoverSubjectId(subjectId);
+
+  if (filterSubjectId) {
+    const subjectWorkIds =
+      await loadDiscoverWorkIdsForSubject(
+        supabase,
+        filterSubjectId,
+      );
+    const workCount = await countDiscoverWorksByIds(
+      supabase,
+      subjectWorkIds,
+      getDiscoverDbCategoriesFilter(categories),
+    );
+
+    return Math.max(
+      1,
+      Math.ceil(workCount / WORKS_PER_BATCH),
+    );
+  }
+
   const searchTokens =
     tokenizeDiscoverSearchQuery(
       normalizedSearch,
@@ -968,13 +1420,32 @@ export async function getDiscoverCandidatePageCount(
           searchTokens,
         )
       : [];
+  const subjectSearch =
+    normalizedSearch && searchTokens.length > 0
+      ? await resolveDiscoverSubjectSearch(
+          supabase,
+          normalizedSearch,
+          searchTokens,
+          categories,
+        )
+      : null;
+  const priorityWorkIds = subjectSearch
+    ? mergeDiscoverSearchWorkIds(subjectSearch)
+    : [];
 
   const workCount =
-    await getDiscoverableWorkCount(
-      supabase,
-      categories,
-      tokenMatches,
-    );
+    subjectSearch
+      ? await getDiscoverableWorkCountWithSubjects(
+          supabase,
+          categories,
+          tokenMatches,
+          priorityWorkIds,
+        )
+      : await getDiscoverableWorkCount(
+          supabase,
+          categories,
+          tokenMatches,
+        );
 
   return Math.max(
     1,
@@ -993,6 +1464,8 @@ export async function getDiscoverCandidateBatch(
   round = 0,
 
   searchQuery: string | null = null,
+
+  subjectId: string | null = null,
 
 ): Promise<DiscoverCandidateBatch> {
 
@@ -1013,6 +1486,50 @@ export async function getDiscoverCandidateBatch(
 
   const supabase = await createClient();
 
+  const filterSubjectId =
+    normalizedSearch
+      ? null
+      : parseDiscoverSubjectId(subjectId);
+
+  if (filterSubjectId) {
+    const dbCategories =
+      getDiscoverDbCategoriesFilter(categories);
+    const subjectWorkIds =
+      await loadDiscoverWorkIdsForSubject(
+        supabase,
+        filterSubjectId,
+      );
+    const workCount = await countDiscoverWorksByIds(
+      supabase,
+      subjectWorkIds,
+      dbCategories,
+    );
+    const workPageCount = Math.max(
+      1,
+      Math.ceil(workCount / WORKS_PER_BATCH),
+    );
+    const workPage = safeRound % workPageCount;
+    const from = workPage * WORKS_PER_BATCH;
+    const to = from + WORKS_PER_BATCH - 1;
+    const rows =
+      workCount === 0
+        ? []
+        : await fetchDiscoverWorksByIds(
+            supabase,
+            subjectWorkIds,
+            dbCategories,
+            { from, to },
+          );
+
+    return {
+      works: rowsToFeedItems(rows, dbCategories),
+      nextRound: safeRound + 1,
+      artistPageCount: workPageCount,
+      artistPage: workPage,
+      workPage,
+    };
+  }
+
   const searchTokens = tokenizeDiscoverSearchQuery(
     normalizedSearch,
   );
@@ -1025,22 +1542,35 @@ export async function getDiscoverCandidateBatch(
         )
       : [];
 
-
+  const subjectSearch =
+    normalizedSearch && searchTokens.length > 0
+      ? await resolveDiscoverSubjectSearch(
+          supabase,
+          normalizedSearch,
+          searchTokens,
+          categories,
+        )
+      : null;
+  const priorityWorkIds = subjectSearch
+    ? mergeDiscoverSearchWorkIds(subjectSearch)
+    : [];
 
   const dbCategories =
     getDiscoverDbCategoriesFilter(categories);
 
   const workCount =
-
-    await getDiscoverableWorkCount(
-
-      supabase,
-
-      categories,
-
-      tokenMatches,
-
-    );
+    subjectSearch
+      ? await getDiscoverableWorkCountWithSubjects(
+          supabase,
+          categories,
+          tokenMatches,
+          priorityWorkIds,
+        )
+      : await getDiscoverableWorkCount(
+          supabase,
+          categories,
+          tokenMatches,
+        );
 
 
 
@@ -1072,7 +1602,49 @@ export async function getDiscoverCandidateBatch(
 
   let rows: WorkWithCreator[] = [];
 
-  if (dbCategories) {
+  if (subjectSearch) {
+    const {
+      prioritySlice,
+      metadataFrom,
+      metadataLimit,
+    } = sliceDiscoverSearchPriorityPage(
+      priorityWorkIds,
+      from,
+      WORKS_PER_BATCH,
+    );
+    const priorityRows =
+      await fetchDiscoverWorksByIds(
+        supabase,
+        prioritySlice,
+        dbCategories,
+      );
+    const priorityRowsById = new Map(
+      priorityRows.map((row) => [row.id, row]),
+    );
+    const orderedPriorityRows = prioritySlice.flatMap(
+      (workId) => {
+        const row = priorityRowsById.get(workId);
+
+        return row ? [row] : [];
+      },
+    );
+    const metadataRows =
+      metadataLimit > 0
+        ? await fetchDiscoverMetadataSearchRows(
+            supabase,
+            dbCategories,
+            tokenMatches,
+            metadataFrom,
+            metadataLimit,
+            new Set(prioritySlice),
+          )
+        : [];
+
+    rows = [
+      ...orderedPriorityRows,
+      ...metadataRows,
+    ];
+  } else if (dbCategories) {
     const effectiveRows =
       await fetchDiscoverWorksByEffectiveCategory(
         supabase,
@@ -1135,51 +1707,10 @@ export async function getDiscoverCandidateBatch(
 
 
 
-  const works = rows
-
-    .filter(isDisplayableWork)
-
-    .map((row) => {
-
-      const creator =
-
-        resolveCreator(
-
-          row.artist,
-
-        );
-
-
-
-      return mapWork(row, creator);
-
-    })
-
-    .filter(
-
-      (item): item is FeedItem =>
-
-        item !== null,
-
-    );
-
-
-
-  const filteredWorks = dbCategories
-
-    ? works.filter((work) =>
-
-        workMatchesDiscoverCategories(
-
-          work,
-
-          dbCategories,
-
-        ),
-
-      )
-
-    : works;
+  const filteredWorks = rowsToFeedItems(
+    rows,
+    dbCategories,
+  );
 
 
 
@@ -1194,6 +1725,9 @@ export async function getDiscoverCandidateBatch(
     artistPage: workPage,
 
     workPage,
+
+    subjectMatchCount:
+      subjectSearch?.subjectMatchCount,
 
   };
 

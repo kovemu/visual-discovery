@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { YouTubeVideoMeta } from "@/lib/youtube/fetchYouTubeVideo";
+import { classifyWorksSubjectsSafe } from "@/lib/subjects/classifyWorks.server";
 
 export type ImportedWorkRow = {
   id: number | string;
@@ -89,8 +90,11 @@ export async function createImportedYouTubeWork(
     return { work: null, error };
   }
 
+  const work = data as ImportedWorkRow;
+  await classifyWorksSubjectsSafe(supabase, [work.id]);
+
   return {
-    work: data as ImportedWorkRow,
+    work,
     error: null,
   };
 }

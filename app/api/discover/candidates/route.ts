@@ -11,6 +11,7 @@ import {
   parseDiscoverCategory,
 } from "@/lib/discover/discoverRowCategories";
 import type { CreatorCategory } from "@/lib/creator/creatorCategories";
+import { parseDiscoverSubjectId } from "@/lib/discover/discoverSubjectFilter";
 import {
   getDiscoverCandidateBatch,
   getDiscoverCandidatePageCount,
@@ -117,6 +118,14 @@ export async function GET(
       request.nextUrl.searchParams.get("q"),
     );
 
+  const subjectId = searchQuery
+    ? null
+    : parseDiscoverSubjectId(
+        request.nextUrl.searchParams.get(
+          "subjectId",
+        ),
+      );
+
   const roundValue =
     request.nextUrl.searchParams.get(
       "round",
@@ -147,6 +156,7 @@ export async function GET(
       await getDiscoverCandidatePageCount(
         categories,
         searchQuery,
+        subjectId,
       );
     const startOffset =
       deterministicStartOffset(
@@ -186,6 +196,7 @@ export async function GET(
         categories,
         virtualRound,
         searchQuery,
+        subjectId,
       );
 
     return NextResponse.json({
@@ -194,6 +205,12 @@ export async function GET(
       artistPageCount: workPageCount,
       artistPage: workPage,
       workPage,
+      ...(typeof batch.subjectMatchCount === "number"
+        ? {
+            subjectMatchCount:
+              batch.subjectMatchCount,
+          }
+        : {}),
     });
   }
 
@@ -202,6 +219,7 @@ export async function GET(
       categories,
       safeRound,
       searchQuery,
+      subjectId,
     );
 
   return NextResponse.json({
@@ -211,5 +229,11 @@ export async function GET(
       batch.artistPageCount,
     artistPage: batch.artistPage,
     workPage: batch.workPage,
+    ...(typeof batch.subjectMatchCount === "number"
+      ? {
+          subjectMatchCount:
+            batch.subjectMatchCount,
+        }
+      : {}),
   });
 }

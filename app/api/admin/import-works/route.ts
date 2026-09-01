@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+import { classifyWorksSubjectsSafe } from "@/lib/subjects/classifyWorks.server";
 import { normalizeRotationDegrees } from "@/lib/works/workRotation";
 import { buildCanonicalTikTokUrl } from "@/lib/tiktok/extractTikTokVideoId";
 import { resolveTikTokThumbnailUrl } from "@/lib/tiktok/resolveTikTokThumbnailUrl";
@@ -232,7 +233,7 @@ export async function POST(request: NextRequest) {
         onConflict: "source,source_id",
         ignoreDuplicates: false,
       })
-      .select();
+      .select("id");
 
     if (error) {
       console.error("IMPORT WORKS ERROR:", error);
@@ -245,6 +246,11 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    await classifyWorksSubjectsSafe(
+      supabaseAdmin,
+      (data ?? []).map((row) => row.id),
+    );
 
     return NextResponse.json({
       success: true,

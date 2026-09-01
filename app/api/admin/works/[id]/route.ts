@@ -6,6 +6,7 @@ import {
 import { createClient } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+import { classifyWorksSubjectsSafe } from "@/lib/subjects/classifyWorks.server";
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -123,6 +124,11 @@ export async function PATCH(
         { status: 400 },
       );
     }
+
+    await classifyWorksSubjectsSafe(
+      supabaseAdmin,
+      [id],
+    );
 
     return NextResponse.json({
       success: true,

@@ -66,6 +66,7 @@ async function fetchCategoryBatch(
   round: number,
   searchQuery: string,
   seed: string,
+  subjectId: string,
 ) {
   const params = new URLSearchParams({
     round: String(round),
@@ -81,6 +82,8 @@ async function fetchCategoryBatch(
 
   if (searchQuery) {
     params.set("q", searchQuery);
+  } else if (subjectId) {
+    params.set("subjectId", subjectId);
   }
 
   const response = await fetch(
@@ -99,6 +102,7 @@ export function useDiscoverFeed(
   pickedWorkIds: Set<string>,
   picksReady: boolean,
   searchQuery = "",
+  subjectId = "",
 ) {
   const normalizedSearch = searchQuery.trim();
   const isSearchMode = normalizedSearch.length > 0;
@@ -234,11 +238,14 @@ export function useDiscoverFeed(
       needed: number,
       generation: number,
       queryToLoad: string,
+      subjectIdToLoad: string,
     ) => {
       const categories = resolveCategoriesFromSignature(
         signatureToLoad,
       );
       const searchMode = queryToLoad.trim().length > 0;
+      const subjectMode =
+        !searchMode && subjectIdToLoad.length > 0;
 
       const isUsableCandidate = (work: FeedItem) =>
         workMatchesDiscoverCategories(work, categories) &&
@@ -260,6 +267,7 @@ export function useDiscoverFeed(
           roundRef.current,
           queryToLoad,
           searchMode ? "" : feedSeedRef.current,
+          searchMode ? "" : subjectIdToLoad,
         );
 
         if (generation !== generationRef.current) {
@@ -319,7 +327,15 @@ export function useDiscoverFeed(
           candidateBufferRef.current.push(...matches);
         }
 
+        if (subjectMode && emptyPageStreakRef.current >= 2) {
+          break;
+        }
+
         if (!searchMode && emptyPageStreakRef.current >= 6) {
+          if (subjectMode) {
+            break;
+          }
+
           seenIdsRef.current = new Set(
             worksRef.current.map((work) => work.id),
           );
@@ -369,6 +385,7 @@ export function useDiscoverFeed(
           INITIAL_FEED_SIZE,
           generation,
           normalizedSearch,
+          subjectId,
         );
 
         if (generation !== generationRef.current) {
@@ -388,7 +405,7 @@ export function useDiscoverFeed(
         }
       }
     })();
-  }, [categorySignature, collectBatch, isSearchMode, normalizedSearch, picksReady, resetSearchLoopState]);
+  }, [categorySignature, collectBatch, isSearchMode, normalizedSearch, picksReady, resetSearchLoopState, subjectId]);
 
   const appendNextBatch = useCallback(async () => {
     if (appendingRef.current || isLoading) {
@@ -426,6 +443,7 @@ export function useDiscoverFeed(
         APPEND_BATCH_SIZE,
         generation,
         normalizedSearch,
+        subjectId,
       );
 
       if (generation !== generationRef.current) {
@@ -484,6 +502,7 @@ export function useDiscoverFeed(
     isSearchMode,
     isSearchLoopReady,
     normalizedSearch,
+    subjectId,
     takeFromSearchLoop,
   ]);
 

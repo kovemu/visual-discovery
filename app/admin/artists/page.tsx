@@ -215,6 +215,12 @@ export default async function AdminArtistsPage({
 
             <div className="flex flex-wrap items-center gap-2">
               <Link
+                href="/admin/subjects"
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 text-sm font-medium text-zinc-900 transition hover:border-zinc-400 hover:bg-zinc-50"
+              >
+                Subjects
+              </Link>
+              <Link
                 href="/admin/submissions"
                 className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 text-sm font-medium text-zinc-900 transition hover:border-zinc-400 hover:bg-zinc-50"
               >

@@ -8,6 +8,7 @@ import {
 } from "@supabase/supabase-js";
 
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/auth/requireAdmin";
+import { classifyWorksSubjectsSafe } from "@/lib/subjects/classifyWorks.server";
 
 const supabaseUrl =
   process.env
@@ -367,6 +368,11 @@ export async function POST(
         },
       );
     }
+
+    await classifyWorksSubjectsSafe(
+      supabaseAdmin,
+      (data ?? []).map((row) => row.id),
+    );
 
     return NextResponse.json({
       success: true,

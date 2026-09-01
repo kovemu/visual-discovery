@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ImportedWorkRow } from "@/lib/picks/importYouTubeWork";
+import { classifyWorksSubjectsSafe } from "@/lib/subjects/classifyWorks.server";
 import {
   asOptionalOEmbedString,
   fetchTikTokOEmbed,
@@ -88,8 +89,11 @@ export async function createImportedTikTokWork(
     return { work: null, error };
   }
 
+  const work = data as ImportedWorkRow;
+  await classifyWorksSubjectsSafe(supabase, [work.id]);
+
   return {
-    work: data as ImportedWorkRow,
+    work,
     error: null,
   };
 }
