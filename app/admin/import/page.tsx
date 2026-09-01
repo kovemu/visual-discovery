@@ -2896,6 +2896,63 @@ function removeExternalImageDraft(
               ? sortedAdditionalWorks
               : [];
 
+  const displayedSelectedCount =
+    displayedVideos.reduce(
+      (count, video) =>
+        selectedVideoIds.has(video.id)
+          ? count + 1
+          : count,
+      0,
+    );
+
+  const allDisplayedSelected =
+    displayedVideos.length > 0 &&
+    displayedSelectedCount ===
+      displayedVideos.length;
+
+  function selectAllDisplayedVideos() {
+    setSelectedVideoIds((current) => {
+      const next = new Set(current);
+
+      for (const video of displayedVideos) {
+        next.add(video.id);
+      }
+
+      return next;
+    });
+  }
+
+  function deselectAllDisplayedVideos() {
+    const displayedIds = new Set(
+      displayedVideos.map(
+        (video) => video.id,
+      ),
+    );
+
+    setSelectedVideoIds((current) => {
+      const next = new Set(current);
+
+      for (const id of displayedIds) {
+        next.delete(id);
+      }
+
+      return next;
+    });
+
+    setFeaturedVideoIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+
+      for (const id of displayedIds) {
+        if (next.delete(id)) {
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }
+
   const allVideoWorks =
     Array.from(
       new Map(
@@ -4582,6 +4639,31 @@ if (
                   )}
                 </div>
               )}
+
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <span className="text-sm text-zinc-600">
+                {displayedSelectedCount}{" "}
+                selected
+              </span>
+
+              <button
+                type="button"
+                onClick={
+                  allDisplayedSelected
+                    ? deselectAllDisplayedVideos
+                    : selectAllDisplayedVideos
+                }
+                disabled={
+                  displayedVideos.length ===
+                  0
+                }
+                className="text-sm text-zinc-500 transition hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {allDisplayedSelected
+                  ? "Deselect All"
+                  : "Select All"}
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
               {displayedVideos.map(
