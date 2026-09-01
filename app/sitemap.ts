@@ -1,5 +1,9 @@
 import type { MetadataRoute } from "next";
 
+import {
+  CHEERLEADER_LANDING_URLS,
+} from "@/lib/seo/cheerleaderLanding";
+
 const BASE_URL = "https://kovemu.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -8,6 +12,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
       url: BASE_URL,
+      lastModified,
+    },
+    {
+      url: CHEERLEADER_LANDING_URLS.ko,
+      lastModified,
+    },
+    {
+      url: CHEERLEADER_LANDING_URLS.zhTw,
       lastModified,
     },
     {

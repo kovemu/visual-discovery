@@ -53,6 +53,8 @@ export type FeedItem = {
 
 type DiscoverFeedProps = {
   works: FeedItem[];
+  initialCategories?: CreatorCategory[];
+  hideDiscoverHeading?: boolean;
 };
 
 const DISCOVER_SEARCH_DEBOUNCE_MS = 300;
@@ -70,6 +72,8 @@ function normalizeDiscoverSearchQueryForAnalytics(
 
 export default function DiscoverFeed({
   works: _initialWorks,
+  initialCategories,
+  hideDiscoverHeading = false,
 }: DiscoverFeedProps) {
   const { t } = useTranslation();
   const supabase = useMemo(
@@ -78,9 +82,13 @@ export default function DiscoverFeed({
   );
 
   const [selectedCategories, setSelectedCategories] =
-    useState<Set<CreatorCategory>>(
-      () => createAllSelectedCategories(),
-    );
+    useState<Set<CreatorCategory>>(() => {
+      if (initialCategories?.length) {
+        return new Set(initialCategories);
+      }
+
+      return createAllSelectedCategories();
+    });
 
   const categorySignature = useMemo(
     () =>
@@ -507,18 +515,20 @@ export default function DiscoverFeed({
   return (
     <>
       <div className="w-full min-w-0">
-        <div className="mb-[22px]">
-          <div className="flex items-center gap-2.5">
-            <span
-              aria-hidden="true"
-              className="h-5 w-0.5 shrink-0 rounded-full bg-[#a855f7]"
-            />
-            <h1 className="text-xl font-semibold leading-tight text-white/[0.94]">
-              Discover
-            </h1>
+        {!hideDiscoverHeading && (
+          <div className="mb-[22px]">
+            <div className="flex items-center gap-2.5">
+              <span
+                aria-hidden="true"
+                className="h-5 w-0.5 shrink-0 rounded-full bg-[#a855f7]"
+              />
+              <h1 className="text-xl font-semibold leading-tight text-white/[0.94]">
+                Discover
+              </h1>
+            </div>
+            <div className="h-5" aria-hidden="true" />
           </div>
-          <div className="h-5" aria-hidden="true" />
-        </div>
+        )}
 
         <div className="mb-5 flex flex-wrap items-center gap-[11px] md:mb-6">
           <button
