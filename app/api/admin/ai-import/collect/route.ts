@@ -5,7 +5,7 @@ import {
   adminAuthErrorResponse,
   requireAdmin,
 } from "@/lib/auth/requireAdmin";
-import { collectAiImportCandidates } from "@/lib/ai-import/collectCandidates.server";
+import { collectAiImportCandidatesWeb } from "@/lib/ai-import/collectCandidatesWeb.server";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -83,14 +83,14 @@ export async function POST(request: NextRequest) {
           error:
             recentRun.status === "running"
               ? "AI Import가 이미 실행 중입니다. 잠시 후 다시 확인해주세요."
-              : "최근 30분 안에 이미 수집을 실행했습니다. YouTube quota 보호를 위해 잠시 후 다시 실행해주세요.",
+              : "최근 30분 안에 이미 수집을 실행했습니다. YouTube 웹 검색 과도 호출 방지를 위해 잠시 후 다시 실행해주세요.",
           recentRun,
         },
         { status: 409 },
       );
     }
 
-    const stats = await collectAiImportCandidates(supabase, {
+    const stats = await collectAiImportCandidatesWeb(supabase, {
       triggerType: "manual",
       maxQueue,
     });
