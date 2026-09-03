@@ -91,14 +91,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stats = await collectAiImportCandidatesWeb(supabase, {
+    const collected = await collectAiImportCandidatesWeb(supabase, {
       triggerType: "manual",
       maxQueue,
     });
+    const stats = collected as Record<string, unknown>;
 
     const batchKey = typeof stats.batchKey === "string" ? stats.batchKey : "";
     const runId = typeof stats.runId === "string" ? stats.runId : undefined;
-    let thumbnailStyle = null;
+    let thumbnailStyle: Record<string, unknown> | null = null;
 
     if (batchKey && Number(stats.queuedCount ?? 0) > 0) {
       try {
