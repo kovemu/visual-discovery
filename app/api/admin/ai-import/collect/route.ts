@@ -6,6 +6,7 @@ import {
   requireAdmin,
 } from "@/lib/auth/requireAdmin";
 import { collectAiImportCandidatesWeb } from "@/lib/ai-import/collectCandidatesWeb.server";
+import { applyThumbnailStyleScores } from "@/lib/ai-import/thumbnailStyle.server";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -95,7 +96,31 @@ export async function POST(request: NextRequest) {
       maxQueue,
     });
 
-    return NextResponse.json({ success: true, stats });
+    const batchKey = typeof stats.batchKey === "string" ? stats.batchKey : "";
+    const runId = typeof stats.runId === "string" ? stats.runId : undefined;
+    let thumbnailStyle = null;
+
+    if (batchKey && Number(stats.queuedCount ?? 0) > 0) {
+      try {
+        thumbnailStyle = await applyThumbnailStyleScores(supabase, {
+          batchKey,
+          runId,
+        });
+      } catch (visualError) {
+        console.error("THUMBNAIL STYLE SCORING ERROR:", visualError);
+        thumbnailStyle = {
+          error:
+            visualError instanceof Error
+              ? visualError.message
+              : "Thumbnail style scoring failed.",
+        };
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      stats: { ...stats, thumbnailStyle },
+    });
   } catch (error) {
     console.error("MANUAL AI IMPORT COLLECT ERROR:", error);
     return NextResponse.json(
