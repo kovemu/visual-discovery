@@ -23,6 +23,9 @@ const APPEND_BATCH_SIZE = 12;
 const MAX_PAGES_PER_FILL = 16;
 const RECENT_SEEN_LIMIT = 48;
 const SEEDED_START_ROUND = 1;
+const INITIAL_DISCOVER_MIX_PAGES = 3;
+const APPEND_DISCOVER_FRESH_PAGES = 1;
+const MAX_CANDIDATE_BUFFER_SIZE = 144;
 
 function createFeedSeed() {
   if (
@@ -106,6 +109,7 @@ export function useDiscoverFeed(
 ) {
   const normalizedSearch = searchQuery.trim();
   const isSearchMode = normalizedSearch.length > 0;
+  const isSubjectMode = !isSearchMode && subjectId.length > 0;
   const [works, setWorks] = useState<FeedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -239,6 +243,7 @@ export function useDiscoverFeed(
       generation: number,
       queryToLoad: string,
       subjectIdToLoad: string,
+      minimumFreshPages = 0,
     ) => {
       const categories = resolveCategoriesFromSignature(
         signatureToLoad,
@@ -246,6 +251,7 @@ export function useDiscoverFeed(
       const searchMode = queryToLoad.trim().length > 0;
       const subjectMode =
         !searchMode && subjectIdToLoad.length > 0;
+      const normalDiscoverMode = !searchMode && !subjectMode;
 
       const isUsableCandidate = (work: FeedItem) =>
         workMatchesDiscoverCategories(work, categories) &&
@@ -256,9 +262,13 @@ export function useDiscoverFeed(
         candidateBufferRef.current.filter(isUsableCandidate);
 
       let pagesTried = 0;
+      const freshPageTarget = normalDiscoverMode
+        ? Math.max(0, Math.floor(minimumFreshPages))
+        : 0;
 
       while (
-        candidateBufferRef.current.length < needed &&
+        (candidateBufferRef.current.length < needed ||
+          pagesTried < freshPageTarget) &&
         pagesTried < MAX_PAGES_PER_FILL &&
         !(searchMode && searchExhaustedRef.current)
       ) {
@@ -266,7 +276,7 @@ export function useDiscoverFeed(
           signatureToLoad,
           roundRef.current,
           queryToLoad,
-          searchMode ? "" : feedSeedRef.current,
+          normalDiscoverMode ? feedSeedRef.current : "",
           searchMode ? "" : subjectIdToLoad,
         );
 
@@ -351,7 +361,10 @@ export function useDiscoverFeed(
         recentArtistIdsRef.current,
       );
 
-      candidateBufferRef.current = remaining;
+      candidateBufferRef.current =
+        remaining.length > MAX_CANDIDATE_BUFFER_SIZE
+          ? remaining.slice(-MAX_CANDIDATE_BUFFER_SIZE)
+          : remaining;
       rememberSelectedWorks(selected);
 
       return selected;
@@ -370,7 +383,10 @@ export function useDiscoverFeed(
     seenIdsRef.current = new Set();
     recentIdsRef.current = [];
     recentArtistIdsRef.current = [];
-    roundRef.current = isSearchMode ? 0 : SEEDED_START_ROUND;
+    roundRef.current =
+      isSearchMode || isSubjectMode
+        ? 0
+        : SEEDED_START_ROUND;
     emptyPageStreakRef.current = 0;
     appendingRef.current = false;
     resetSearchLoopState();
@@ -386,6 +402,9 @@ export function useDiscoverFeed(
           generation,
           normalizedSearch,
           subjectId,
+          isSearchMode || isSubjectMode
+            ? 0
+            : INITIAL_DISCOVER_MIX_PAGES,
         );
 
         if (generation !== generationRef.current) {
@@ -405,7 +424,7 @@ export function useDiscoverFeed(
         }
       }
     })();
-  }, [categorySignature, collectBatch, isSearchMode, normalizedSearch, picksReady, resetSearchLoopState, subjectId]);
+  }, [categorySignature, collectBatch, isSearchMode, isSubjectMode, normalizedSearch, picksReady, resetSearchLoopState, subjectId]);
 
   const appendNextBatch = useCallback(async () => {
     if (appendingRef.current || isLoading) {
@@ -444,6 +463,9 @@ export function useDiscoverFeed(
         generation,
         normalizedSearch,
         subjectId,
+        isSearchMode || isSubjectMode
+          ? 0
+          : APPEND_DISCOVER_FRESH_PAGES,
       );
 
       if (generation !== generationRef.current) {
@@ -501,6 +523,7 @@ export function useDiscoverFeed(
     isLoading,
     isSearchMode,
     isSearchLoopReady,
+    isSubjectMode,
     normalizedSearch,
     subjectId,
     takeFromSearchLoop,
