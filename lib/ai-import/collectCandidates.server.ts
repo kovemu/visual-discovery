@@ -14,7 +14,7 @@ const CATEGORIES: AiImportCategory[] = ["kpop", "cheer"];
 const SUBJECTS_PER_CATEGORY = 12;
 const SEARCH_RESULTS_PER_SUBJECT = 25;
 const LOOKBACK_DAYS = 21;
-const PRE_AI_LIMIT = 320;
+const PRE_AI_LIMIT = 260;
 const MAX_QUEUE = 200;
 const SOFT_CATEGORY_TARGET = 100;
 const MAX_PER_SUBJECT = 20;
@@ -82,11 +82,6 @@ type YoutubeVideo = {
   embeddable: boolean;
 };
 
-type SearchHit = {
-  subject: Subject;
-  query: string;
-};
-
 type RankedCandidate = YoutubeVideo & {
   category: AiImportCategory;
   subject: Subject;
@@ -99,11 +94,6 @@ type RankedCandidate = YoutubeVideo & {
 type CollectorOptions = {
   triggerType: "manual" | "cron";
   maxQueue?: number;
-};
-
-type SubjectStats = {
-  count: number;
-  latestPublishedAt: string | null;
 };
 
 function clamp(value: number, min = 0, max = 100) {
@@ -219,7 +209,7 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   mapper: (item: T, index: number) => Promise<R>,
 ) {
-  if (items.length === 0) return [];
+  if (items.length === 0) return [] as R[];
   const results = new Array<R>(items.length);
   let cursor = 0;
 
@@ -241,7 +231,7 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function loadSubjects(supabase: SupabaseClient) {
+async function loadSubjects(supabase: SupabaseClient): Promise<Subject[]> {
   const { data: subjectRows, error } = await supabase
     .from("subjects")
     .select("id, type, category, slug, name_ko, name_en, name_zh_tw")
@@ -250,14 +240,17 @@ async function loadSubjects(supabase: SupabaseClient) {
 
   if (error) throw new Error(`Failed to load subjects: ${error.message}`);
 
-  const ids = (subjectRows ?? []).map((row) => row.id as string);
+  const rows = (subjectRows ?? []).filter(
+    (row) => row.category === "kpop" || row.category === "cheer",
+  );
+  const ids = rows.map((row) => String(row.id));
   const aliasesBySubject = new Map<string, string[]>();
 
   for (let index = 0; index < ids.length; index += 200) {
     const chunk = ids.slice(index, index + 200);
     const { data: aliasRows, error: aliasError } = await supabase
       .from("subject_aliases")
-      .select("subject_id, alias, auto_match_enabled")
+      .select("subject_id, alias")
       .in("subject_id", chunk);
 
     if (aliasError) {
@@ -274,83 +267,51 @@ async function loadSubjects(supabase: SupabaseClient) {
     }
   }
 
-  return (subjectRows ?? [])
-    .filter(
-      (row) => row.category === "kpop" || row.category === "cheer",
-    )
-    .map((row) => ({
-      id: row.id as string,
+  const statsBySubject = new Map<
+    string,
+    { workCount: number; latestPublishedAt: string | null }
+  >();
+
+  for (let index = 0; index < ids.length; index += 200) {
+    const chunk = ids.slice(index, index + 200);
+    const { data: statsRows, error: statsError } = await supabase
+      .from("ai_import_subject_stats")
+      .select("subject_id, work_count, latest_published_at")
+      .in("subject_id", chunk);
+
+    if (statsError) {
+      throw new Error(`Failed to load subject stats: ${statsError.message}`);
+    }
+
+    for (const row of statsRows ?? []) {
+      if (typeof row.subject_id !== "string") continue;
+      statsBySubject.set(row.subject_id, {
+        workCount: Number(row.work_count ?? 0),
+        latestPublishedAt:
+          typeof row.latest_published_at === "string"
+            ? row.latest_published_at
+            : null,
+      });
+    }
+  }
+
+  return rows.map((row): Subject => {
+    const id = String(row.id);
+    const stats = statsBySubject.get(id);
+    return {
+      id,
       type: typeof row.type === "string" ? row.type : "other",
       category: row.category as AiImportCategory,
       slug: typeof row.slug === "string" ? row.slug : "",
       nameKo: typeof row.name_ko === "string" ? row.name_ko : "",
       nameEn: typeof row.name_en === "string" ? row.name_en : "",
       nameZhTw: typeof row.name_zh_tw === "string" ? row.name_zh_tw : "",
-      aliases: aliasesBySubject.get(row.id as string) ?? [],
-      workCount: 0,
-      latestPublishedAt: null,
+      aliases: aliasesBySubject.get(id) ?? [],
+      workCount: stats?.workCount ?? 0,
+      latestPublishedAt: stats?.latestPublishedAt ?? null,
       priorityScore: 0,
-    })) satisfies Subject[];
-}
-
-async function loadSubjectStats(
-  supabase: SupabaseClient,
-  subjectIds: string[],
-) {
-  const stats = new Map<string, SubjectStats>();
-  const pageSize = 1000;
-
-  for (let chunkIndex = 0; chunkIndex < subjectIds.length; chunkIndex += 120) {
-    const subjectChunk = subjectIds.slice(chunkIndex, chunkIndex + 120);
-    let from = 0;
-
-    while (true) {
-      const { data, error } = await supabase
-        .from("work_subjects")
-        .select(
-          "subject_id, work:works!inner(published_at, discover_eligible)",
-        )
-        .in("subject_id", subjectChunk)
-        .range(from, from + pageSize - 1);
-
-      if (error) {
-        throw new Error(`Failed to load subject work stats: ${error.message}`);
-      }
-
-      for (const row of data ?? []) {
-        if (typeof row.subject_id !== "string") continue;
-        const rawWork = Array.isArray(row.work) ? row.work[0] : row.work;
-        const work = rawWork as
-          | { published_at?: string | null; discover_eligible?: boolean | null }
-          | null
-          | undefined;
-
-        if (work?.discover_eligible === false) continue;
-
-        const current = stats.get(row.subject_id) ?? {
-          count: 0,
-          latestPublishedAt: null,
-        };
-        current.count += 1;
-
-        const publishedAt =
-          typeof work?.published_at === "string" ? work.published_at : null;
-        if (
-          publishedAt &&
-          (!current.latestPublishedAt || publishedAt > current.latestPublishedAt)
-        ) {
-          current.latestPublishedAt = publishedAt;
-        }
-
-        stats.set(row.subject_id, current);
-      }
-
-      if ((data ?? []).length < pageSize) break;
-      from += pageSize;
-    }
-  }
-
-  return stats;
+    };
+  });
 }
 
 function computeSubjectPriority(subject: Subject, dateKey: string) {
@@ -379,7 +340,6 @@ function computeSubjectPriority(subject: Subject, dateKey: string) {
 
   const provenBonus = Math.min(28, Math.sqrt(subject.workCount) * 1.8);
   const rotationBonus = simpleHash(`${dateKey}:${subject.id}`) % 24;
-
   return Math.round(activityBonus + coverageBonus + provenBonus + rotationBonus);
 }
 
@@ -390,10 +350,12 @@ function selectSubjects(subjects: Subject[]) {
   for (const category of CATEGORIES) {
     const categorySubjects = subjects
       .filter((subject) => subject.category === category)
-      .map((subject) => ({
-        ...subject,
-        priorityScore: computeSubjectPriority(subject, dateKey),
-      }))
+      .map(
+        (subject): Subject => ({
+          ...subject,
+          priorityScore: computeSubjectPriority(subject, dateKey),
+        }),
+      )
       .sort((a, b) => b.priorityScore - a.priorityScore)
       .slice(0, SUBJECTS_PER_CATEGORY);
 
@@ -477,9 +439,7 @@ function buildSearchQuery(subject: Subject) {
 }
 
 async function searchYouTubeForSubject(subject: Subject) {
-  if (!YOUTUBE_API_KEY) {
-    throw new Error("YOUTUBE_API_KEY is not configured.");
-  }
+  if (!YOUTUBE_API_KEY) throw new Error("YOUTUBE_API_KEY is not configured.");
 
   const query = buildSearchQuery(subject);
   const publishedAfter = new Date(
@@ -520,10 +480,7 @@ async function searchYouTubeForSubject(subject: Subject) {
     .map((item: { id?: { videoId?: string } }) => item.id?.videoId)
     .filter((id: unknown): id is string => typeof id === "string");
 
-  return {
-    query,
-    ids: Array.from(new Set(ids)),
-  };
+  return Array.from(new Set(ids));
 }
 
 function parseDuration(duration: string) {
@@ -537,9 +494,7 @@ function parseDuration(duration: string) {
 }
 
 async function loadYouTubeDetails(videoIds: string[]) {
-  if (!YOUTUBE_API_KEY) {
-    throw new Error("YOUTUBE_API_KEY is not configured.");
-  }
+  if (!YOUTUBE_API_KEY) throw new Error("YOUTUBE_API_KEY is not configured.");
 
   const videos = new Map<string, YoutubeVideo>();
 
@@ -597,7 +552,6 @@ async function loadExistingSourceIds(
 
   for (let index = 0; index < sourceIds.length; index += 200) {
     const chunk = sourceIds.slice(index, index + 200);
-
     const [{ data: works, error: worksError }, { data: queued, error: queueError }] =
       await Promise.all([
         supabase
@@ -778,7 +732,7 @@ async function createRun(
     .single();
 
   if (error) throw new Error(`Failed to create import run: ${error.message}`);
-  return data.id as string;
+  return String(data.id);
 }
 
 async function finishRun(
@@ -798,18 +752,14 @@ async function finishRun(
     })
     .eq("id", runId);
 
-  if (error) {
-    console.error("AI IMPORT RUN FINISH ERROR:", error);
-  }
+  if (error) console.error("AI IMPORT RUN FINISH ERROR:", error);
 }
 
 export async function collectAiImportCandidates(
   supabase: SupabaseClient,
   options: CollectorOptions,
 ) {
-  if (!YOUTUBE_API_KEY) {
-    throw new Error("YOUTUBE_API_KEY is not configured.");
-  }
+  if (!YOUTUBE_API_KEY) throw new Error("YOUTUBE_API_KEY is not configured.");
 
   const runId = await createRun(supabase, options.triggerType);
   const maxQueue = Math.max(1, Math.min(options.maxQueue ?? MAX_QUEUE, MAX_QUEUE));
@@ -824,17 +774,6 @@ export async function collectAiImportCandidates(
 
   try {
     const subjects = await loadSubjects(supabase);
-    const subjectStats = await loadSubjectStats(
-      supabase,
-      subjects.map((subject) => subject.id),
-    );
-
-    for (const subject of subjects) {
-      const subjectStat = subjectStats.get(subject.id);
-      subject.workCount = subjectStat?.count ?? 0;
-      subject.latestPublishedAt = subjectStat?.latestPublishedAt ?? null;
-    }
-
     const selectedSubjects = selectSubjects(subjects);
     const profileEntries = await Promise.all(
       CATEGORIES.map(async (category) => [
@@ -862,24 +801,27 @@ export async function collectAiImportCandidates(
       4,
       async (subject) => {
         try {
-          const result = await searchYouTubeForSubject(subject);
-          return { subject, ...result, error: null as string | null };
+          return {
+            subject,
+            ids: await searchYouTubeForSubject(subject),
+            error: null as string | null,
+          };
         } catch (error) {
           const message = error instanceof Error ? error.message : "Search failed";
           console.error("AI IMPORT SUBJECT SEARCH ERROR:", subject.nameKo, message);
-          return { subject, query: buildSearchQuery(subject), ids: [] as string[], error: message };
+          return { subject, ids: [] as string[], error: message };
         }
       },
     );
 
-    const hitsByVideoId = new Map<string, SearchHit[]>();
+    const hitsByVideoId = new Map<string, Subject[]>();
     let searchErrorCount = 0;
 
     for (const result of searchResults) {
       if (result.error) searchErrorCount += 1;
       for (const id of result.ids) {
         const hits = hitsByVideoId.get(id) ?? [];
-        hits.push({ subject: result.subject, query: result.query });
+        hits.push(result.subject);
         hitsByVideoId.set(id, hits);
       }
     }
@@ -897,38 +839,44 @@ export async function collectAiImportCandidates(
 
     const details = await loadYouTubeDetails(rawIds);
     const existingSourceIds = await loadExistingSourceIds(supabase, rawIds);
+    const drafts: Array<
+      YoutubeVideo & { subject: Subject; subjectMatchScore: number }
+    > = [];
 
-    const drafts: Array<YoutubeVideo & { subject: Subject; subjectMatchScore: number }> = [];
-
-    for (const [videoId, hits] of hitsByVideoId) {
+    for (const [videoId, subjectsForVideo] of hitsByVideoId) {
       if (existingSourceIds.has(videoId)) continue;
       const video = details.get(videoId);
-      if (!video || !video.embeddable || video.durationSeconds <= 0 || video.durationSeconds > 240) {
+      if (
+        !video ||
+        !video.embeddable ||
+        video.durationSeconds <= 0 ||
+        video.durationSeconds > 240
+      ) {
         continue;
       }
 
-      let best:
-        | { subject: Subject; subjectMatchScore: number }
-        | null = null;
+      let bestSubject: Subject | null = null;
+      let bestMatchScore = 0;
 
-      for (const hit of hits) {
-        const matchScore = getSubjectMatchScore(video, hit.subject);
-        if (matchScore === 0) continue;
+      for (const subject of subjectsForVideo) {
+        const matchScore = getSubjectMatchScore(video, subject);
         if (
-          !best ||
-          matchScore > best.subjectMatchScore ||
-          (matchScore === best.subjectMatchScore &&
-            hit.subject.priorityScore > best.subject.priorityScore)
+          matchScore > bestMatchScore ||
+          (matchScore === bestMatchScore &&
+            matchScore > 0 &&
+            subject.priorityScore > (bestSubject?.priorityScore ?? -1))
         ) {
-          best = {
-            subject: hit.subject,
-            subjectMatchScore: matchScore,
-          };
+          bestSubject = subject;
+          bestMatchScore = matchScore;
         }
       }
 
-      if (!best) continue;
-      drafts.push({ ...video, ...best });
+      if (!bestSubject || bestMatchScore === 0) continue;
+      drafts.push({
+        ...video,
+        subject: bestSubject,
+        subjectMatchScore: bestMatchScore,
+      });
     }
 
     stats.newMatchedVideoCount = drafts.length;
@@ -956,18 +904,13 @@ export async function collectAiImportCandidates(
     stats.aiFallbackCount = aiResult.fallbackCount;
 
     const ranked: RankedCandidate[] = [];
-
     for (const candidate of aiCandidatesSource) {
       const ai = judgments.get(candidate.id);
       if (!ai) continue;
       const finalScore = Math.round(
         clamp(ai.score * 0.7 + candidate.heuristicScore * 0.3),
       );
-      ranked.push({
-        ...candidate,
-        ai,
-        finalScore,
-      });
+      ranked.push({ ...candidate, ai, finalScore });
     }
 
     const selectedForQueue = selectForQueue(ranked, maxQueue);
@@ -1005,7 +948,6 @@ export async function collectAiImportCandidates(
     }));
 
     let insertedCount = 0;
-
     if (rows.length > 0) {
       const { data: inserted, error: insertError } = await supabase
         .from("ai_import_candidates")
@@ -1018,7 +960,6 @@ export async function collectAiImportCandidates(
       if (insertError) {
         throw new Error(`Failed to queue candidates: ${insertError.message}`);
       }
-
       insertedCount = inserted?.length ?? 0;
     }
 
@@ -1033,7 +974,9 @@ export async function collectAiImportCandidates(
     Object.assign(stats, {
       eligibleAfterAiCount: ranked.filter((candidate) => {
         if (candidate.ai.action === "reject") return false;
-        if (candidate.ai.contentType === "mv" || candidate.ai.contentType === "news") return false;
+        if (candidate.ai.contentType === "mv" || candidate.ai.contentType === "news") {
+          return false;
+        }
         const threshold = candidate.ai.action === "keep" ? 68 : 74;
         return candidate.finalScore >= threshold;
       }).length,
@@ -1052,7 +995,8 @@ export async function collectAiImportCandidates(
     await finishRun(supabase, runId, "success", stats);
     return stats;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "AI import collector failed.";
+    const message =
+      error instanceof Error ? error.message : "AI import collector failed.";
     await finishRun(supabase, runId, "failed", stats, message);
     throw error;
   }
