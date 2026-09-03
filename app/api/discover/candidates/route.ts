@@ -46,56 +46,63 @@ function resolveDiscoverCategories(
   return [category];
 }
 
-function deterministicStartOffset(
+function hashDiscoverSeed(value: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function greatestCommonDivisor(a: number, b: number) {
+  let left = Math.abs(Math.floor(a));
+  let right = Math.abs(Math.floor(b));
+
+  while (right !== 0) {
+    const remainder = left % right;
+    left = right;
+    right = remainder;
+  }
+
+  return left;
+}
+
+function deterministicPageForRound(
   seed: string,
+  clientRound: number,
   workPageCount: number,
 ) {
   if (
     !seed ||
-    !Number.isFinite(
-      workPageCount,
-    ) ||
+    !Number.isFinite(workPageCount) ||
     workPageCount <= 1
   ) {
     return 0;
   }
 
-  let hash = 2166136261;
+  const pageCount = Math.max(1, Math.floor(workPageCount));
+  const start = hashDiscoverSeed(`${seed}:start`) % pageCount;
+  let stride =
+    1 +
+    (hashDiscoverSeed(`${seed}:stride`) % Math.max(1, pageCount - 1));
 
-  for (
-    let index = 0;
-    index < seed.length;
-    index += 1
-  ) {
-    hash ^=
-      seed.charCodeAt(index);
-    hash = Math.imul(
-      hash,
-      16777619,
-    );
+  while (greatestCommonDivisor(stride, pageCount) !== 1) {
+    stride += 1;
+
+    if (stride >= pageCount) {
+      stride = 1;
+    }
   }
 
-  return (
-    Math.abs(hash) %
-    workPageCount
-  );
-}
-
-function computeVirtualRound(
-  clientRound: number,
-  startOffset: number,
-  workPageCount: number,
-) {
-  const round = Math.max(
-    1,
-    Math.floor(clientRound),
+  const logicalIndex = Math.max(
+    0,
+    Math.floor(clientRound) - 1,
   );
 
-  return (
-    startOffset +
-    round -
-    1
-  );
+  return (start + (logicalIndex % pageCount) * stride) % pageCount;
 }
 
 export async function GET(
@@ -158,28 +165,20 @@ export async function GET(
         searchQuery,
         subjectId,
       );
-    const startOffset =
-      deterministicStartOffset(
-        seed,
-        workPageCount,
-      );
-    const virtualRound =
-      computeVirtualRound(
-        safeRound,
-        startOffset,
-        workPageCount,
-      );
+    const workPage = deterministicPageForRound(
+      seed,
+      safeRound,
+      workPageCount,
+    );
     const allowReuseRound0 =
       request.nextUrl.searchParams.get(
         "allowReuseRound0",
       ) === "true";
 
-    const workPage =
-      virtualRound % workPageCount;
-
     if (
       allowReuseRound0 &&
-      virtualRound === 0
+      safeRound === 1 &&
+      workPage === 0
     ) {
       return NextResponse.json({
         works: [],
@@ -194,7 +193,7 @@ export async function GET(
     const batch =
       await getDiscoverCandidateBatch(
         categories,
-        virtualRound,
+        workPage,
         searchQuery,
         subjectId,
       );
