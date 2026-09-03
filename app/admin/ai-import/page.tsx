@@ -21,6 +21,8 @@ type Candidate = {
   view_count: number | null;
   like_count: number | null;
   channel_title: string | null;
+  subject_name: string | null;
+  heuristic_score: number | null;
   ai_score: number | null;
   ai_reason: string | null;
   ai_content_type: string | null;
@@ -50,6 +52,31 @@ type Counts = {
   pendingCheer: number;
 };
 
+type CollectorStats = {
+  runId?: string;
+  searchedSubjectCount?: number;
+  rawSearchVideoCount?: number;
+  newMatchedVideoCount?: number;
+  aiAnalyzedCandidateCount?: number;
+  eligibleAfterAiCount?: number;
+  queuedCount?: number;
+  queuedByCategory?: {
+    kpop?: number;
+    cheer?: number;
+  };
+  aiFallbackCount?: number;
+};
+
+type ImportRun = {
+  id: string;
+  trigger_type: "manual" | "cron";
+  status: "running" | "success" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  stats: CollectorStats | null;
+  error_message: string | null;
+};
+
 type PreviewVideo = {
   videoId: string;
   title: string;
@@ -77,6 +104,12 @@ function getTargetArtist(candidate: Candidate) {
   return candidate.target_artist;
 }
 
+function buildCollectorMessage(stats: CollectorStats) {
+  const kpop = stats.queuedByCategory?.kpop ?? 0;
+  const cheer = stats.queuedByCategory?.cheer ?? 0;
+  return `수집 완료 · ${stats.searchedSubjectCount ?? 0} subjects 검색 · 신규 매칭 ${stats.newMatchedVideoCount ?? 0} · AI 평가 ${stats.aiAnalyzedCandidateCount ?? 0} · Pending ${stats.queuedCount ?? 0} (KPOP ${kpop} / CHEER ${cheer})`;
+}
+
 export default function AdminAiImportPage() {
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
   const [category, setCategory] = useState<"all" | "kpop" | "cheer">("all");
@@ -91,25 +124,23 @@ export default function AdminAiImportPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [reviewing, setReviewing] = useState(false);
+  const [collecting, setCollecting] = useState(false);
+  const [latestRun, setLatestRun] = useState<ImportRun | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [previewVideo, setPreviewVideo] = useState<PreviewVideo>(null);
 
   const loadCandidates = useCallback(async () => {
     setLoading(true);
-    setError("");
-
     try {
       const params = new URLSearchParams({ status, category });
       const response = await fetch(`/api/admin/ai-import?${params.toString()}`, {
         cache: "no-store",
       });
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data.error || "Failed to load AI import candidates.");
       }
-
       setCandidates(data.candidates ?? []);
       setCounts(data.counts ?? {});
       setSelectedIds(new Set());
@@ -120,9 +151,27 @@ export default function AdminAiImportPage() {
     }
   }, [category, status]);
 
+  const loadLatestRun = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/ai-import/collect", {
+        cache: "no-store",
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setLatestRun(data.runs?.[0] ?? null);
+      }
+    } catch {
+      // Candidate review remains usable even if run history cannot be loaded.
+    }
+  }, []);
+
   useEffect(() => {
     void loadCandidates();
   }, [loadCandidates]);
+
+  useEffect(() => {
+    void loadLatestRun();
+  }, [loadLatestRun]);
 
   const allSelected = useMemo(
     () => candidates.length > 0 && candidates.every((candidate) => selectedIds.has(candidate.id)),
@@ -146,9 +195,42 @@ export default function AdminAiImportPage() {
     });
   }
 
+  async function runCollector() {
+    if (collecting) return;
+    setCollecting(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/ai-import/collect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxQueue: 200 }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "AI Import collection failed.");
+      }
+
+      const stats = (data.stats ?? {}) as CollectorStats;
+      setMessage(buildCollectorMessage(stats));
+      setStatus("pending");
+      setCategory("all");
+      await Promise.all([loadCandidates(), loadLatestRun()]);
+    } catch (collectError) {
+      setError(
+        collectError instanceof Error
+          ? collectError.message
+          : "AI Import collection failed.",
+      );
+      await loadLatestRun();
+    } finally {
+      setCollecting(false);
+    }
+  }
+
   async function reviewSelected(action: "approve" | "reject") {
     if (selectedIds.size === 0 || reviewing) return;
-
     setReviewing(true);
     setError("");
     setMessage("");
@@ -160,7 +242,6 @@ export default function AdminAiImportPage() {
         body: JSON.stringify({ action, ids: Array.from(selectedIds) }),
       });
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data.error || "Review failed.");
       }
@@ -187,10 +268,18 @@ export default function AdminAiImportPage() {
             <div>
               <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">AI Import Review</h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
-                자동 수집된 KPOP · CHEER YouTube 후보를 확인한 뒤 승인합니다. 승인된 영상만 Discover에 노출됩니다.
+                기존 KPOP · CHEER Works의 패턴을 기준으로 최근 YouTube 직캠을 수집·점수화합니다. 승인된 영상만 Discover에 노출됩니다.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void runCollector()}
+                disabled={collecting}
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-violet-600 px-5 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
+              >
+                {collecting ? "AI 수집 중..." : "Run AI Import"}
+              </button>
               <Link
                 href="/admin/artists"
                 className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50"
@@ -204,6 +293,20 @@ export default function AdminAiImportPage() {
                 YouTube Importer
               </Link>
             </div>
+          </div>
+        </section>
+
+        <section className="mb-5 rounded-2xl border border-violet-100 bg-violet-50/60 px-4 py-3 text-sm text-violet-950">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              1회 실행: KPOP 12 + CHEER 12 subject를 자동 선정해 최근 21일 영상을 검사하고 최대 200개만 Pending에 넣습니다.
+            </span>
+            {latestRun && (
+              <span className="text-xs text-violet-700">
+                Last: {latestRun.status.toUpperCase()} · {new Date(latestRun.started_at).toLocaleString()}
+                {latestRun.status === "success" ? ` · ${latestRun.stats?.queuedCount ?? 0} queued` : ""}
+              </span>
+            )}
           </div>
         </section>
 
@@ -295,7 +398,9 @@ export default function AdminAiImportPage() {
         ) : candidates.length === 0 ? (
           <section className="rounded-2xl border border-dashed border-zinc-300 bg-white py-24 text-center">
             <h2 className="text-lg font-semibold text-zinc-900">No candidates</h2>
-            <p className="mt-2 text-sm text-zinc-500">현재 조건에 맞는 AI Import 후보가 없습니다.</p>
+            <p className="mt-2 text-sm text-zinc-500">
+              Pending이 비어 있습니다. 위의 Run AI Import를 누르면 새로운 후보를 수집합니다.
+            </p>
           </section>
         ) : (
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -352,6 +457,7 @@ export default function AdminAiImportPage() {
                     <h2 className="line-clamp-2 text-sm font-semibold leading-5 text-zinc-950">{candidate.title}</h2>
                     <p className="mt-2 truncate text-xs text-zinc-500">
                       {candidate.channel_title || "YouTube"}
+                      {candidate.subject_name ? ` · ${candidate.subject_name}` : ""}
                       {targetArtist ? ` · → ${targetArtist.name}` : " · → category admin"}
                     </p>
 
@@ -359,6 +465,9 @@ export default function AdminAiImportPage() {
                       <span>{formatDuration(candidate.duration_seconds)}</span>
                       <span>{formatCompactNumber(candidate.view_count)} views</span>
                       <span>{formatCompactNumber(candidate.like_count)} likes</span>
+                      {typeof candidate.heuristic_score === "number" && (
+                        <span>H {candidate.heuristic_score}</span>
+                      )}
                       {candidate.published_at && (
                         <span>{new Date(candidate.published_at).toLocaleDateString()}</span>
                       )}

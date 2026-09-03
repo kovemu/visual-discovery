@@ -34,6 +34,9 @@ type CandidateRow = {
   channel_id: string | null;
   channel_title: string | null;
   target_artist_id: string | null;
+  subject_id: string | null;
+  subject_name: string | null;
+  heuristic_score: number | null;
   ai_score: number | null;
   ai_reason: string | null;
   ai_content_type: string | null;
@@ -45,10 +48,7 @@ type CandidateRow = {
 };
 
 function getAdminClient() {
-  if (!supabaseUrl || !serviceRoleKey) {
-    return null;
-  }
-
+  if (!supabaseUrl || !serviceRoleKey) return null;
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
@@ -58,31 +58,21 @@ function getAdminClient() {
 }
 
 function parseIds(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
+  if (!Array.isArray(value)) return [];
   return Array.from(
     new Set(
       value
         .map((item) => Number(item))
-        .filter(
-          (item) =>
-            Number.isSafeInteger(item) && item > 0,
-        ),
+        .filter((item) => Number.isSafeInteger(item) && item > 0),
     ),
   ).slice(0, 300);
 }
 
 export async function GET(request: NextRequest) {
   const auth = await requireAdmin();
-
-  if (!auth.ok) {
-    return adminAuthErrorResponse(auth);
-  }
+  if (!auth.ok) return adminAuthErrorResponse(auth);
 
   const supabaseAdmin = getAdminClient();
-
   if (!supabaseAdmin) {
     return NextResponse.json(
       { error: "Supabase server configuration is missing." },
@@ -119,12 +109,16 @@ export async function GET(request: NextRequest) {
         channel_id,
         channel_title,
         target_artist_id,
+        subject_id,
+        subject_name,
+        heuristic_score,
         ai_score,
         ai_reason,
         ai_content_type,
         score_breakdown,
         status,
         batch_key,
+        imported_work_id,
         created_at,
         reviewed_at,
         target_artist:creators!ai_import_candidates_target_artist_id_fkey(
@@ -154,10 +148,7 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.error("AI IMPORT CANDIDATES LOAD ERROR:", error);
-    return NextResponse.json(
-      { error: error.message },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
   if (countError) {
@@ -175,12 +166,8 @@ export async function GET(request: NextRequest) {
   for (const row of countRows ?? []) {
     if (row.status === "pending") {
       counts.pending += 1;
-      if (row.category === "kpop") {
-        counts.pendingKpop += 1;
-      }
-      if (row.category === "cheer") {
-        counts.pendingCheer += 1;
-      }
+      if (row.category === "kpop") counts.pendingKpop += 1;
+      if (row.category === "cheer") counts.pendingCheer += 1;
     } else if (row.status === "approved") {
       counts.approved += 1;
     } else if (row.status === "rejected") {
@@ -188,21 +175,14 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({
-    candidates: data ?? [],
-    counts,
-  });
+  return NextResponse.json({ candidates: data ?? [], counts });
 }
 
 export async function POST(request: NextRequest) {
   const auth = await requireAdmin();
-
-  if (!auth.ok) {
-    return adminAuthErrorResponse(auth);
-  }
+  if (!auth.ok) return adminAuthErrorResponse(auth);
 
   const supabaseAdmin = getAdminClient();
-
   if (!supabaseAdmin) {
     return NextResponse.json(
       { error: "Supabase server configuration is missing." },
@@ -216,45 +196,29 @@ export async function POST(request: NextRequest) {
     const ids = parseIds(body.ids);
 
     if (action !== "approve" && action !== "reject") {
-      return NextResponse.json(
-        { error: "Invalid review action." },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Invalid review action." }, { status: 400 });
     }
-
     if (ids.length === 0) {
-      return NextResponse.json(
-        { error: "No candidates selected." },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "No candidates selected." }, { status: 400 });
     }
 
-    const { data: rawCandidates, error: candidateError } =
-      await supabaseAdmin
-        .from("ai_import_candidates")
-        .select("*")
-        .in("id", ids)
-        .eq("status", "pending");
+    const { data: rawCandidates, error: candidateError } = await supabaseAdmin
+      .from("ai_import_candidates")
+      .select("*")
+      .in("id", ids)
+      .eq("status", "pending");
 
     if (candidateError) {
-      return NextResponse.json(
-        { error: candidateError.message },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: candidateError.message }, { status: 400 });
     }
 
     const candidates = (rawCandidates ?? []).filter(
       (candidate): candidate is CandidateRow =>
-        ALLOWED_CATEGORIES.has(candidate.category) &&
-        candidate.source === "youtube",
+        ALLOWED_CATEGORIES.has(candidate.category) && candidate.source === "youtube",
     );
 
     if (candidates.length === 0) {
-      return NextResponse.json({
-        success: true,
-        reviewedCount: 0,
-        importedCount: 0,
-      });
+      return NextResponse.json({ success: true, reviewedCount: 0, importedCount: 0 });
     }
 
     const reviewedAt = new Date().toISOString();
@@ -262,20 +226,11 @@ export async function POST(request: NextRequest) {
     if (action === "reject") {
       const { error: rejectError } = await supabaseAdmin
         .from("ai_import_candidates")
-        .update({
-          status: "rejected",
-          reviewed_at: reviewedAt,
-        })
-        .in(
-          "id",
-          candidates.map((candidate) => candidate.id),
-        );
+        .update({ status: "rejected", reviewed_at: reviewedAt })
+        .in("id", candidates.map((candidate) => candidate.id));
 
       if (rejectError) {
-        return NextResponse.json(
-          { error: rejectError.message },
-          { status: 400 },
-        );
+        return NextResponse.json({ error: rejectError.message }, { status: 400 });
       }
 
       return NextResponse.json({
@@ -285,21 +240,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: fallbackCreators, error: creatorError } =
-      await supabaseAdmin
-        .from("creators")
-        .select("id, username, category")
-        .in("username", ["admin_kpop", "admin_cheer"]);
+    const { data: fallbackCreators, error: creatorError } = await supabaseAdmin
+      .from("creators")
+      .select("id, username, category")
+      .in("username", ["admin_kpop", "admin_cheer"]);
 
     if (creatorError) {
-      return NextResponse.json(
-        { error: creatorError.message },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: creatorError.message }, { status: 400 });
     }
 
     const fallbackByCategory = new Map<string, string>();
-
     for (const creator of fallbackCreators ?? []) {
       if (
         typeof creator.category === "string" &&
@@ -312,15 +262,11 @@ export async function POST(request: NextRequest) {
 
     const unresolvedCategory = candidates.find(
       (candidate) =>
-        !candidate.target_artist_id &&
-        !fallbackByCategory.has(candidate.category),
+        !candidate.target_artist_id && !fallbackByCategory.has(candidate.category),
     );
-
     if (unresolvedCategory) {
       return NextResponse.json(
-        {
-          error: `Fallback creator for ${unresolvedCategory.category} is missing.`,
-        },
+        { error: `Fallback creator for ${unresolvedCategory.category} is missing.` },
         { status: 400 },
       );
     }
@@ -333,27 +279,22 @@ export async function POST(request: NextRequest) {
       .in("source_id", sourceIds);
 
     if (existingError) {
-      return NextResponse.json(
-        { error: existingError.message },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: existingError.message }, { status: 400 });
     }
 
     const existingBySourceId = new Map(
       (existingWorks ?? []).map((work) => [work.source_id, work]),
     );
-
     const newCandidates = candidates.filter(
       (candidate) => !existingBySourceId.has(candidate.source_id),
     );
 
-    let insertedWorkIds: number[] = [];
+    const importedWorkBySourceId = new Map<string, number>();
 
     if (newCandidates.length > 0) {
       const rows = newCandidates.map((candidate) => ({
         artist_id:
-          candidate.target_artist_id ??
-          fallbackByCategory.get(candidate.category)!,
+          candidate.target_artist_id ?? fallbackByCategory.get(candidate.category)!,
         type: "video",
         source: "youtube",
         source_id: candidate.source_id,
@@ -370,62 +311,46 @@ export async function POST(request: NextRequest) {
         thumbnail_rotation_degrees: 0,
       }));
 
-      const { data: insertedWorks, error: insertError } =
-        await supabaseAdmin
-          .from("works")
-          .insert(rows)
-          .select("id");
+      const { data: insertedWorks, error: insertError } = await supabaseAdmin
+        .from("works")
+        .insert(rows)
+        .select("id, source_id");
 
       if (insertError) {
         console.error("AI IMPORT APPROVE INSERT ERROR:", insertError);
-        return NextResponse.json(
-          { error: insertError.message },
-          { status: 400 },
-        );
+        return NextResponse.json({ error: insertError.message }, { status: 400 });
       }
 
-      insertedWorkIds = (insertedWorks ?? []).map((work) => work.id);
-    }
-
-    const duplicateWorkIds = (existingWorks ?? []).map((work) => work.id);
-
-    if (duplicateWorkIds.length > 0) {
-      const { error: discoverError } = await supabaseAdmin
-        .from("works")
-        .update({ discover_eligible: true })
-        .in("id", duplicateWorkIds);
-
-      if (discoverError) {
-        console.error("AI IMPORT EXISTING WORK APPROVAL ERROR:", discoverError);
-        return NextResponse.json(
-          { error: discoverError.message },
-          { status: 400 },
-        );
+      for (const work of insertedWorks ?? []) {
+        if (typeof work.source_id === "string" && typeof work.id === "number") {
+          importedWorkBySourceId.set(work.source_id, work.id);
+        }
       }
     }
 
-    const workIdsToClassify = [...insertedWorkIds, ...duplicateWorkIds];
+    for (const work of existingWorks ?? []) {
+      if (typeof work.source_id === "string" && typeof work.id === "number") {
+        importedWorkBySourceId.set(work.source_id, work.id);
+      }
+    }
 
+    const workIdsToClassify = Array.from(importedWorkBySourceId.values());
     await classifyWorksSubjectsSafe(supabaseAdmin, workIdsToClassify);
 
-    const { error: reviewError } = await supabaseAdmin
-      .from("ai_import_candidates")
-      .update({
-        status: "approved",
-        reviewed_at: reviewedAt,
-      })
-      .in(
-        "id",
-        candidates.map((candidate) => candidate.id),
-      );
+    await Promise.all(
+      candidates.map(async (candidate) => {
+        const { error: reviewError } = await supabaseAdmin
+          .from("ai_import_candidates")
+          .update({
+            status: "approved",
+            reviewed_at: reviewedAt,
+            imported_work_id: importedWorkBySourceId.get(candidate.source_id) ?? null,
+          })
+          .eq("id", candidate.id);
 
-    if (reviewError) {
-      console.error("AI IMPORT REVIEW STATUS ERROR:", reviewError);
-      return NextResponse.json(
-        { error: reviewError.message },
-        { status: 400 },
-      );
-    }
+        if (reviewError) throw reviewError;
+      }),
+    );
 
     return NextResponse.json({
       success: true,
@@ -436,7 +361,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("AI IMPORT REVIEW SERVER ERROR:", error);
     return NextResponse.json(
-      { error: "Unexpected server error." },
+      {
+        error: error instanceof Error ? error.message : "Unexpected server error.",
+      },
       { status: 500 },
     );
   }
