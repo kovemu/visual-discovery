@@ -14,6 +14,7 @@ export const PRODUCT_EVENT_NAMES = [
   "signup",
   "filter_change",
   "search",
+  "recent_filter",
 ] as const;
 
 export type ProductEventName =
