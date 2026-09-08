@@ -10,7 +10,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+} from "lucide-react";
 
 import type { FeedItem } from "@/components/discover/DiscoverFeed";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
@@ -19,6 +23,10 @@ import {
   formatDurationSeconds,
   getWorkThumbnail,
 } from "@/lib/works/workDisplay";
+import {
+  getMostPickTier,
+  type MostPickTier,
+} from "@/lib/discover/mostPickTier";
 
 const CAROUSEL_GAP = 12;
 const CARD_PORTRAIT_RATIO = 2.35;
@@ -250,6 +258,38 @@ function smoothScrollTo(
       behavior: "smooth",
     });
   });
+}
+
+function getMostPickFrameClass(
+  tier: MostPickTier | null,
+) {
+  if (tier === "silver") {
+    return "bg-gradient-to-br from-slate-100 via-slate-400 to-slate-200 p-[2px] shadow-[0_0_18px_rgba(203,213,225,0.24)]";
+  }
+
+  if (tier === "gold") {
+    return "bg-gradient-to-br from-amber-200 via-yellow-400 to-amber-600 p-[2px] shadow-[0_0_20px_rgba(250,204,21,0.28)]";
+  }
+
+  if (tier === "prism") {
+    return "bg-[conic-gradient(from_135deg_at_50%_50%,#f472b6,#c084fc,#60a5fa,#34d399,#facc15,#fb7185,#f472b6)] p-[2px] shadow-[0_0_22px_rgba(192,132,252,0.30)]";
+  }
+
+  return "";
+}
+
+function getMostPickBadgeClass(
+  tier: MostPickTier,
+) {
+  if (tier === "silver") {
+    return "border-white/45 bg-slate-200/95 text-slate-950";
+  }
+
+  if (tier === "gold") {
+    return "border-amber-100/60 bg-amber-300/95 text-amber-950";
+  }
+
+  return "border-white/55 bg-black/75 text-white backdrop-blur-sm";
 }
 
 export default function DiscoverCarousel({
@@ -914,6 +954,9 @@ export default function DiscoverCarousel({
 
   function renderCard(work: FeedItem, feedIndex: number) {
     const thumbnail = getWorkThumbnail(work);
+    const mostPickTier = getMostPickTier(
+      work.pickCount,
+    );
 
     return (
       <div
@@ -926,68 +969,88 @@ export default function DiscoverCarousel({
           aspectRatio: "1 / 2.35",
         }}
       >
-        <article
-          role="button"
-          tabIndex={0}
-          onClick={() =>
-            handleCardActivate(work)
-          }
-          onKeyDown={(
-            event: ReactKeyboardEvent,
-          ) => {
-            if (
-              event.key === "Enter" ||
-              event.key === " "
-            ) {
-              handleCardActivate(work);
-            }
-          }}
-          className={`group relative h-full w-full cursor-pointer overflow-hidden rounded-2xl bg-neutral-950 text-left transition-all duration-300 ${
-            pickedWorkIds.has(work.id)
-              ? "ring-2 ring-violet-500 ring-offset-2 ring-offset-[#050505]"
-              : ""
-          }`}
+        <div
+          className={`relative h-full w-full rounded-2xl ${getMostPickFrameClass(
+            mostPickTier,
+          )}`}
         >
-          {thumbnail ? (
-            <RotatedWorkThumbnail
-              src={thumbnail}
-              alt={
-                work.artistName
-                  ? `${work.artistName} work`
-                  : "Discover work"
+          <article
+            role="button"
+            tabIndex={0}
+            onClick={() =>
+              handleCardActivate(work)
+            }
+            onKeyDown={(
+              event: ReactKeyboardEvent,
+            ) => {
+              if (
+                event.key === "Enter" ||
+                event.key === " "
+              ) {
+                handleCardActivate(work);
               }
-              rotationDegrees={
-                work.thumbnailRotationDegrees
-              }
-              draggable={false}
-              referrerPolicy={
-                work.type === "tiktok"
-                  ? "no-referrer"
-                  : undefined
-              }
-              imgClassName="h-full w-full object-cover object-center transition duration-500 ease-out group-hover:scale-[1.02]"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-sm text-white/30">
-              No thumbnail
-            </div>
-          )}
-
-          {pickedWorkIds.has(work.id) && (
-            <div className="pointer-events-none absolute left-2 top-2 flex h-7 items-center justify-center rounded-full bg-violet-600/95 px-2.5 text-[10px] font-semibold text-white shadow md:h-8 md:px-3 md:text-[11px]">
-              {t("savedState")}
-            </div>
-          )}
-
-          {work.durationSeconds &&
-            work.durationSeconds > 0 && (
-              <div className="pointer-events-none absolute bottom-2 right-2 z-[1] rounded px-1 py-0.5 text-[10px] font-medium leading-none text-white bg-black/75 md:px-1.5 md:py-1 md:text-[11px]">
-                {formatDurationSeconds(
-                  work.durationSeconds,
-                )}
+            }}
+            className={`group relative h-full w-full cursor-pointer overflow-hidden rounded-2xl bg-neutral-950 text-left transition-all duration-300 ${
+              pickedWorkIds.has(work.id)
+                ? "ring-2 ring-violet-500 ring-offset-2 ring-offset-[#050505]"
+                : ""
+            }`}
+          >
+            {thumbnail ? (
+              <RotatedWorkThumbnail
+                src={thumbnail}
+                alt={
+                  work.artistName
+                    ? `${work.artistName} work`
+                    : "Discover work"
+                }
+                rotationDegrees={
+                  work.thumbnailRotationDegrees
+                }
+                draggable={false}
+                referrerPolicy={
+                  work.type === "tiktok"
+                    ? "no-referrer"
+                    : undefined
+                }
+                imgClassName="h-full w-full object-cover object-center transition duration-500 ease-out group-hover:scale-[1.02]"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-sm text-white/30">
+                No thumbnail
               </div>
             )}
-        </article>
+
+            {mostPickTier && (
+              <div
+                className={`pointer-events-none absolute left-2 top-2 z-[2] inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[9px] font-bold tracking-[0.06em] shadow md:h-8 md:px-3 md:text-[10px] ${getMostPickBadgeClass(
+                  mostPickTier,
+                )}`}
+              >
+                <Sparkles
+                  size={11}
+                  strokeWidth={2.2}
+                />
+                MOST PICK
+              </div>
+            )}
+
+            {pickedWorkIds.has(work.id) && (
+              <div className="pointer-events-none absolute right-2 top-2 z-[2] flex h-7 items-center justify-center rounded-full bg-violet-600/95 px-2.5 text-[10px] font-semibold text-white shadow md:h-8 md:px-3 md:text-[11px]">
+                {t("savedState")}
+              </div>
+            )}
+
+            {work.durationSeconds &&
+              work.durationSeconds > 0 && (
+                <div className="pointer-events-none absolute bottom-2 right-2 z-[1] rounded px-1 py-0.5 text-[10px] font-medium leading-none text-white bg-black/75 md:px-1.5 md:py-1 md:text-[11px]">
+                  {formatDurationSeconds(
+                    work.durationSeconds,
+                  )}
+                </div>
+              )}
+          </article>
+        </div>
       </div>
     );
   }
