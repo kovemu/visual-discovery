@@ -8,6 +8,7 @@ import SavedPanel, {
 } from "@/components/discover/SavedPanel";
 import DiscoverCarousel from "@/components/discover/DiscoverCarousel";
 import { useDiscoverFeed } from "@/components/discover/useDiscoverFeed";
+import { useRecentDiscoverFeed } from "@/components/discover/useRecentDiscoverFeed";
 import WorkMediaModal from "@/components/works/WorkMediaModal";
 import {
   ensurePickSession,
@@ -30,6 +31,7 @@ import {
   handleCreatorCategoryClick,
   isAllDiscoverCategoriesSelected,
 } from "@/lib/discover/discoverCategorySelection";
+import { getMostPickTier } from "@/lib/discover/mostPickTier";
 
 export type FeedItem = {
   id: string;
@@ -50,6 +52,8 @@ export type FeedItem = {
   rotationDegrees?: number;
   thumbnailRotationDegrees?: number;
   feedKey?: string;
+  pickCount?: number;
+  discoverAddedAt?: string;
 };
 
 export type DiscoverSubjectFilter = {
@@ -131,6 +135,10 @@ export default function DiscoverFeed({
     debouncedSearch,
     setDebouncedSearch,
   ] = useState("");
+  const [recentMode, setRecentMode] =
+    useState(false);
+  const [todayUpdateCount, setTodayUpdateCount] =
+    useState<number | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -141,6 +149,40 @@ export default function DiscoverFeed({
       window.clearTimeout(timer);
     };
   }, [searchInput]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetch("/api/discover/today-update", {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+
+        return (await response.json()) as {
+          count?: number;
+        };
+      })
+      .then((data) => {
+        if (
+          !cancelled &&
+          typeof data.count === "number"
+        ) {
+          setTodayUpdateCount(data.count);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTodayUpdateCount(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const normalizedQuery =
@@ -201,13 +243,25 @@ export default function DiscoverFeed({
     }
   }, [debouncedSearch]);
 
-  const feed = useDiscoverFeed(
+  const standardFeed = useDiscoverFeed(
     categorySignature,
     pickedWorkIds,
     picksLoaded,
     debouncedSearch,
     debouncedSearch ? "" : (activeSubject?.id ?? ""),
   );
+
+  const recentFeed = useRecentDiscoverFeed(
+    categorySignature,
+    pickedWorkIds,
+    picksLoaded,
+    recentMode,
+    debouncedSearch ? "" : (activeSubject?.id ?? ""),
+  );
+
+  const feed = recentMode
+    ? recentFeed
+    : standardFeed;
 
   const discoverViewTrackedRef = useRef(false);
 
@@ -288,6 +342,41 @@ export default function DiscoverFeed({
         to: nextSignature,
       },
     });
+  }
+
+  function toggleRecentMode() {
+    const next = !recentMode;
+
+    if (next) {
+      setSearchInput("");
+      setDebouncedSearch("");
+      lastSearchEventKeyRef.current = null;
+    }
+
+    setRecentMode(next);
+
+    trackProductEvent({
+      event_name: "recent_filter",
+      metadata: {
+        enabled: next,
+        category: categorySignature,
+      },
+    });
+  }
+
+  function handleSearchInputChange(value: string) {
+    if (recentMode && value.trim()) {
+      setRecentMode(false);
+      trackProductEvent({
+        event_name: "recent_filter",
+        metadata: {
+          enabled: false,
+          category: categorySignature,
+        },
+      });
+    }
+
+    setSearchInput(value);
   }
 
   const categoryButtonClass = (isActive: boolean) =>
@@ -489,7 +578,8 @@ export default function DiscoverFeed({
       },
     });
     setPickPanelRefreshKey((current) => current + 1);
-    feed.removePickedWork(work.id);
+    standardFeed.removePickedWork(work.id);
+    recentFeed.removePickedWork(work.id);
     void feed.appendNextBatch();
   }
 
@@ -518,11 +608,22 @@ export default function DiscoverFeed({
   function openWork(work: FeedItem) {
     setSelectedWork(work);
 
+    const mostPickTier = getMostPickTier(
+      work.pickCount,
+    );
+
     trackProductEvent({
       event_name: "card_open",
       work_id: work.id,
       metadata: {
         source: getAnalyticsSource(work),
+        feed_mode: recentMode
+          ? "recent"
+          : "discover",
+        pick_count: work.pickCount ?? 0,
+        ...(mostPickTier
+          ? { most_pick_tier: mostPickTier }
+          : {}),
       },
     });
   }
@@ -553,7 +654,13 @@ export default function DiscoverFeed({
                 Discover
               </h1>
             </div>
-            <div className="h-5" aria-hidden="true" />
+            <p className="mt-1.5 h-5 pl-3 text-[10px] font-medium tracking-[0.04em] text-white/[0.38] md:text-[11px]">
+              Today update ·{" "}
+              <span className="text-white/[0.72]">
+                {todayUpdateCount ?? "—"}
+              </span>{" "}
+              cards
+            </p>
           </div>
         )}
 
@@ -618,17 +725,32 @@ export default function DiscoverFeed({
             </span>
           ) : null}
 
-          <input
-            type="search"
-            value={searchInput}
-            onChange={(event) =>
-              setSearchInput(
-                event.target.value,
-              )
-            }
-            placeholder="Search clips"
-            aria-label="Search clips"
-            className="ml-0 h-8 min-w-[140px] flex-1 rounded border border-white/12 bg-white/[0.04] px-2.5 text-[10px] text-white outline-none transition placeholder:text-white/[0.32] focus:border-white/25 sm:max-w-[180px] sm:flex-none md:ml-2 md:text-[11px]"          />
+          <div className="ml-0 flex h-8 min-w-[170px] flex-1 items-center gap-2 sm:max-w-[280px] sm:flex-none md:ml-2 md:max-w-[320px]">
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(event) =>
+                handleSearchInputChange(
+                  event.target.value,
+                )
+              }
+              placeholder="Search clips"
+              aria-label="Search clips"
+              className="h-8 min-w-0 flex-1 rounded border border-white/12 bg-white/[0.04] px-2.5 text-[10px] text-white outline-none transition placeholder:text-white/[0.32] focus:border-white/25 md:text-[11px]"
+            />
+            <button
+              type="button"
+              onClick={toggleRecentMode}
+              aria-pressed={recentMode}
+              className={`h-8 shrink-0 rounded border px-2.5 text-[10px] font-semibold tracking-[0.04em] transition md:px-3 md:text-[11px] ${
+                recentMode
+                  ? "border-[rgba(192,132,252,0.68)] bg-[rgba(168,85,247,0.10)] text-[#d8b4fe] shadow-[0_0_0_1px_rgba(168,85,247,0.08)]"
+                  : "border-white/12 bg-white/[0.04] text-white/[0.62] hover:border-white/25 hover:text-white/[0.86]"
+              }`}
+            >
+              Recent
+            </button>
+          </div>
         </div>
 
         {pickError ? (
@@ -638,7 +760,7 @@ export default function DiscoverFeed({
         ) : null}
 
         <DiscoverCarousel
-          key={`${categorySignature}:${debouncedSearch}:${activeSubject?.id ?? ""}`}
+          key={`${categorySignature}:${debouncedSearch}:${activeSubject?.id ?? ""}:${recentMode ? "recent" : "discover"}`}
           works={feed.works}
           pickedWorkIds={pickedWorkIds}
           isLoading={feed.isLoading}
