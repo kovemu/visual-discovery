@@ -126,13 +126,10 @@ function sanitizeMetadata(
     return {};
   }
 
-  if (
-    eventName === "card_open" ||
-    eventName === "original_click"
-  ) {
+  if (eventName === "card_open") {
     const sanitized: Record<
       string,
-      string
+      string | number
     > = {};
 
     if (
@@ -143,7 +140,43 @@ function sanitizeMetadata(
       sanitized.source = raw.source;
     }
 
+    if (
+      raw.feed_mode === "discover" ||
+      raw.feed_mode === "recent"
+    ) {
+      sanitized.feed_mode = raw.feed_mode;
+    }
+
+    if (
+      typeof raw.pick_count === "number" &&
+      Number.isInteger(raw.pick_count) &&
+      raw.pick_count >= 0 &&
+      raw.pick_count <= 1000000
+    ) {
+      sanitized.pick_count = raw.pick_count;
+    }
+
+    if (
+      raw.most_pick_tier === "silver" ||
+      raw.most_pick_tier === "gold" ||
+      raw.most_pick_tier === "prism"
+    ) {
+      sanitized.most_pick_tier = raw.most_pick_tier;
+    }
+
     return sanitized;
+  }
+
+  if (eventName === "original_click") {
+    if (
+      raw.source === "youtube" ||
+      raw.source === "tiktok" ||
+      raw.source === "image"
+    ) {
+      return { source: raw.source };
+    }
+
+    return {};
   }
 
   if (eventName === "next") {
@@ -255,6 +288,25 @@ function sanitizeMetadata(
 
     if (from && to && from !== to) {
       return { from, to };
+    }
+
+    return {};
+  }
+
+  if (eventName === "recent_filter") {
+    const category =
+      sanitizeAnalyticsCategoryValue(
+        raw.category,
+      );
+
+    if (
+      category &&
+      typeof raw.enabled === "boolean"
+    ) {
+      return {
+        enabled: raw.enabled,
+        category,
+      };
     }
 
     return {};
