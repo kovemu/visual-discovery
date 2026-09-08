@@ -12,6 +12,7 @@ import {
 } from "@/lib/discover/discoverRowCategories";
 import type { CreatorCategory } from "@/lib/creator/creatorCategories";
 import { parseDiscoverSubjectId } from "@/lib/discover/discoverSubjectFilter";
+import { enrichFeedItemsWithPickCounts } from "@/lib/discover/enrichFeedPickCounts";
 import {
   getDiscoverCandidateBatch,
   getDiscoverCandidatePageCount,
@@ -197,9 +198,12 @@ export async function GET(
         searchQuery,
         subjectId,
       );
+    const works = await enrichFeedItemsWithPickCounts(
+      batch.works,
+    );
 
     return NextResponse.json({
-      works: batch.works,
+      works,
       nextRound: safeRound + 1,
       artistPageCount: workPageCount,
       artistPage: workPage,
@@ -220,9 +224,12 @@ export async function GET(
       searchQuery,
       subjectId,
     );
+  const works = await enrichFeedItemsWithPickCounts(
+    batch.works,
+  );
 
   return NextResponse.json({
-    works: batch.works,
+    works,
     nextRound: batch.nextRound,
     artistPageCount:
       batch.artistPageCount,
