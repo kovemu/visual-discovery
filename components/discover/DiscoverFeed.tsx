@@ -256,6 +256,7 @@ export default function DiscoverFeed({
     pickedWorkIds,
     picksLoaded,
     recentMode,
+    debouncedSearch,
     debouncedSearch ? "" : (activeSubject?.id ?? ""),
   );
 
@@ -347,12 +348,6 @@ export default function DiscoverFeed({
   function toggleRecentMode() {
     const next = !recentMode;
 
-    if (next) {
-      setSearchInput("");
-      setDebouncedSearch("");
-      lastSearchEventKeyRef.current = null;
-    }
-
     setRecentMode(next);
 
     trackProductEvent({
@@ -365,17 +360,6 @@ export default function DiscoverFeed({
   }
 
   function handleSearchInputChange(value: string) {
-    if (recentMode && value.trim()) {
-      setRecentMode(false);
-      trackProductEvent({
-        event_name: "recent_filter",
-        metadata: {
-          enabled: false,
-          category: categorySignature,
-        },
-      });
-    }
-
     setSearchInput(value);
   }
 
