@@ -7,6 +7,10 @@ import {
 } from "@/lib/discover/discoverCategorySelection";
 import { enrichFeedItemsWithPickCounts } from "@/lib/discover/enrichFeedPickCounts";
 import { parseDiscoverSubjectId } from "@/lib/discover/discoverSubjectFilter";
+import {
+  normalizeDiscoverSearchQuery,
+  tokenizeDiscoverSearchQuery,
+} from "@/lib/discover/getRealDiscoverWorks";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeRotationDegrees } from "@/lib/works/workRotation";
 
@@ -28,6 +32,7 @@ const RECENT_SELECT = `
   rotation_degrees,
   thumbnail_rotation_degrees,
   artist_name,
+  artist_username,
   artist_category,
   artist_tags,
   effective_category,
@@ -50,6 +55,7 @@ type RecentRow = {
   rotation_degrees: number | null;
   thumbnail_rotation_degrees: number | null;
   artist_name: string | null;
+  artist_username: string | null;
   artist_category: string | null;
   artist_tags: string[] | null;
   effective_category: string | null;
@@ -93,6 +99,24 @@ function applyCategoryFilter<
   }
 
   return query.in("effective_category", categories);
+}
+
+function escapePostgrestIlikePattern(value: string) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/_/g, "\\_");
+}
+
+function buildRecentSearchOrFilter(token: string) {
+  const pattern = `"*${escapePostgrestIlikePattern(token)}*"`;
+
+  return [
+    `title.ilike.${pattern}`,
+    `description.ilike.${pattern}`,
+    `artist_name.ilike.${pattern}`,
+    `artist_username.ilike.${pattern}`,
+  ].join(",");
 }
 
 function rowToFeedItem(row: RecentRow): FeedItem | null {
@@ -175,9 +199,15 @@ function rowToFeedItem(row: RecentRow): FeedItem | null {
 export async function GET(request: NextRequest) {
   const page = parsePage(request.nextUrl.searchParams.get("page"));
   const categories = resolveCategories(request);
-  const subjectId = parseDiscoverSubjectId(
-    request.nextUrl.searchParams.get("subjectId"),
+  const searchQuery = normalizeDiscoverSearchQuery(
+    request.nextUrl.searchParams.get("q"),
   );
+  const searchTokens = tokenizeDiscoverSearchQuery(searchQuery);
+  const subjectId = searchQuery
+    ? null
+    : parseDiscoverSubjectId(
+        request.nextUrl.searchParams.get("subjectId"),
+      );
   const supabase = await createClient();
 
   let subjectWorkIds: number[] | null = null;
@@ -230,6 +260,10 @@ export async function GET(request: NextRequest) {
 
   if (subjectWorkIds) {
     query = query.in("id", subjectWorkIds);
+  }
+
+  for (const token of searchTokens) {
+    query = query.or(buildRecentSearchOrFilter(token));
   }
 
   const { data, error } = await query
