@@ -20,6 +20,7 @@ type RecentResponse = {
 async function fetchRecentPage(
   categorySignature: string,
   page: number,
+  searchQuery: string,
   subjectId: string,
 ) {
   const params = new URLSearchParams({
@@ -30,7 +31,11 @@ async function fetchRecentPage(
     params.set("categories", categorySignature);
   }
 
-  if (subjectId) {
+  const normalizedSearchQuery = searchQuery.trim();
+
+  if (normalizedSearchQuery) {
+    params.set("q", normalizedSearchQuery);
+  } else if (subjectId) {
     params.set("subjectId", subjectId);
   }
 
@@ -51,6 +56,7 @@ export function useRecentDiscoverFeed(
   pickedWorkIds: Set<string>,
   picksReady: boolean,
   enabled: boolean,
+  searchQuery = "",
   subjectId = "",
 ) {
   const [works, setWorks] = useState<FeedItem[]>([]);
@@ -73,6 +79,7 @@ export function useRecentDiscoverFeed(
       const data = await fetchRecentPage(
         categorySignature,
         page,
+        searchQuery,
         subjectId,
       );
 
@@ -94,7 +101,7 @@ export function useRecentDiscoverFeed(
         (work) => !pickedWorkIdsRef.current.has(work.id),
       );
     },
-    [categorySignature, subjectId],
+    [categorySignature, searchQuery, subjectId],
   );
 
   useEffect(() => {
